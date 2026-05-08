@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 47%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 222 84% 56%;
+    --primary: 244 75% 60%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 210 20% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --sidebar: 220 26% 14%;
+    --sidebar-foreground: 215 20% 80%;
+    --sidebar-active: 244 75% 60%;
+    --success: 142 71% 45%;
+    --warning: 38 92% 50%;
+    --info: 217 91% 60%;
+  }
+
+  .dark {
+    --background: 224 32% 7%;
+    --foreground: 210 40% 96%;
+    --card: 222 28% 10%;
+    --card-foreground: 210 40% 96%;
+    --muted: 222 28% 14%;
+    --muted-foreground: 215 16% 65%;
+    --border: 222 28% 18%;
+    --input: 222 28% 18%;
+    --ring: 244 75% 60%;
+    --primary: 244 75% 65%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 222 28% 16%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --sidebar: 224 36% 5%;
+    --sidebar-foreground: 215 20% 75%;
+    --sidebar-active: 244 75% 65%;
+    --success: 142 71% 45%;
+    --warning: 38 92% 50%;
+    --info: 217 91% 60%;
+  }
+
+  html, body {
+    @apply bg-background text-foreground;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  *, *::before, *::after { border-color: hsl(var(--border)); }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+}

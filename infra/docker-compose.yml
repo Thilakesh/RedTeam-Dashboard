@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: recon
+      POSTGRES_DB: recon
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-01-13T07-53-03Z
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      # minio/minio image has no curl; use bash /dev/tcp which is always available.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9000' 2>/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.app
+    environment:
+      DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-change-me
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ../backend:/app
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
+      REDIS_URL: redis://redis:6379/0
+      # ProjectDiscovery Cloud Platform key — used by asnmap (and any future PD tool
+      # that gates behind PDCP). Move to a non-checked-in env file before deploying.
+      PDCP_API_KEY: ${PDCP_API_KEY:-c10b9f3d-8843-4ed3-b9b0-30a361646270}
+      MINIO_URL: http://minio:9000
+      # Browser-accessible URL — used by storage.public_url() so screenshot links
+      # work from the browser.  minio:9000 is only resolvable inside Docker.
+      MINIO_PUBLIC_URL: http://localhost:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: recon
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+    command: sh -c "npm install && npm run dev"
+
+volumes:
+  postgres_data:
+  minio_data:
