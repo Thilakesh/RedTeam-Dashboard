@@ -221,3 +221,61 @@ export async function patchScan(scanId: string, profile: string): Promise<Scan> 
 export async function deleteScan(scanId: string): Promise<void> {
   await api<void>(`/scans/${scanId}`, { method: "DELETE" });
 }
+
+export type VulnScanOut = {
+  id: string;
+  target_domain: string;
+  parent_scan_id: string | null;
+  profile: string;
+  status: string;
+  progress_pct: number;
+  intrusive: boolean;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+};
+
+export type VulnScanDetail = VulnScanOut & {
+  stages: Array<{
+    id: string;
+    stage_name: string;
+    status: string;
+    started_at: string | null;
+    finished_at: string | null;
+    error: string | null;
+  }>;
+};
+
+export type VulnOverview = {
+  total: number;
+  critical: number;
+  high: number;
+  med: number;
+  low: number;
+  info: number;
+  kev_count: number;
+  cve_count: number;
+};
+
+export type VulnOut = {
+  id: string;
+  canonical_key: string;
+  title: string;
+  severity: string;
+  cvss_v3: number | null;
+  cve_ids: string[];
+  cwe_ids: string[];
+  status: string;
+  asset_id: string;
+  asset_label: string;
+  template_id: string | null;
+  kev: boolean;
+  first_seen: string;
+  last_seen: string;
+};
+
+export type VulnsPage = {
+  total: number;
+  items: VulnOut[];
+};

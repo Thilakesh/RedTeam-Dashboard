@@ -1,0 +1,34 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libpq-dev curl ca-certificates unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# nmap — service/version detection and NSE vuln scripts.
+RUN apt-get update && apt-get install -y --no-install-recommends nmap \
+    && rm -rf /var/lib/apt/lists/* \
+    && nmap --version | head -1
+
+# nuclei (ProjectDiscovery) — template-based vulnerability scanner.
+# Installed now so the image is ready for M-Vuln-3; the stage returns empty
+# results in M-Vuln-2 (stub) while authz / sandboxing are completed.
+ARG NUCLEI_VERSION=3.2.4
+RUN curl -fsSL -o /tmp/nuclei.zip \
+        "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip" \
+    && unzip -o /tmp/nuclei.zip nuclei -d /usr/local/bin/ \
+    && rm /tmp/nuclei.zip \
+    && chmod +x /usr/local/bin/nuclei \
+    && nuclei -version
+
+COPY backend/pyproject.toml ./pyproject.toml
+RUN pip install --upgrade pip && pip install .
+
+COPY backend/ ./
+
+CMD ["arq", "app.workers.vuln_runner.VulnWorkerSettings"]

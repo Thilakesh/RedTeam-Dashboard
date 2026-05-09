@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Calendar, Clock, Download, Globe, Share2 } from "lucide-react";
@@ -15,7 +15,7 @@ import { TechnologiesTab } from "@/components/tabs/TechnologiesTab";
 import { PortsTab } from "@/components/tabs/PortsTab";
 import { RisksTab } from "@/components/tabs/RisksTab";
 import { SubdomainsTable } from "@/components/SubdomainsTable";
-import { api, sseUrl, type ScanDetail, type ScanOverview } from "@/lib/api";
+import { api, sseUrl, type ScanDetail, type ScanOverview, type VulnScanOut } from "@/lib/api";
 
 const SSE_EVENTS = [
   "stage.started",
@@ -40,6 +40,8 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
   const VALID_TABS = ["overview", "subdomains", "ips", "cdnwaf", "tech", "ports", "risks", "history"];
   const rawTab = searchParams.get("tab");
   const defaultTab = rawTab && VALID_TABS.includes(rawTab) ? rawTab : "subdomains";
+
+  const [vulnLaunching, setVulnLaunching] = useState(false);
 
   const scan = useQuery({
     queryKey: ["scan", params.id],
@@ -123,6 +125,34 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {s.status === "completed" && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={vulnLaunching}
+              onClick={async () => {
+                setVulnLaunching(true);
+                try {
+                  const result = await api<VulnScanOut>("/vuln-scans", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      parent_scan_id: params.id,
+                      profile: "vuln_quick",
+                    }),
+                  });
+                  router.push(`/vuln-scans/${result.id}`);
+                } catch (err) {
+                  console.error("Failed to start vuln scan:", err);
+                  setVulnLaunching(false);
+                }
+              }}
+            >
+              {vulnLaunching ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : null}
+              Run Vulnerability Analysis
+            </Button>
+          )}
           <Button variant="outline" size="sm">
             <Download className="h-4 w-4" /> Export
           </Button>

@@ -1,0 +1,52 @@
+[
+  {
+    "cpe_contains": "apache:log4j:2",
+    "cve_id": "CVE-2021-44228",
+    "title": "Log4Shell — Apache Log4j2 JNDI RCE",
+    "severity": "CRITICAL",
+    "cvss_v3": 10.0,
+    "description": "Apache Log4j2 <=2.14.1 JNDI lookups allow unauthenticated RCE via crafted log messages.",
+    "cwe_ids": ["CWE-917"],
+    "remediation": "Upgrade to Log4j2 >= 2.17.1"
+  },
+  {
+    "cpe_contains": "apache:struts2",
+    "cve_id": "CVE-2017-5638",
+    "title": "Apache Struts2 Content-Type RCE",
+    "severity": "CRITICAL",
+    "cvss_v3": 10.0,
+    "description": "Apache Struts 2 Jakarta Multipart parser allows RCE via malformed Content-Type header.",
+    "cwe_ids": ["CWE-20"],
+    "remediation": "Upgrade to Struts 2.3.32 or 2.5.10.1+"
+  },
+  {
+    "cpe_contains": "openssl:openssl:1.0",
+    "cve_id": "CVE-2014-0160",
+    "title": "Heartbleed — OpenSSL Memory Disclosure",
+    "severity": "HIGH",
+    "cvss_v3": 7.5,
+    "description": "OpenSSL 1.0.1 through 1.0.1f allows remote attackers to read process memory via heartbeat extension.",
+    "cwe_ids": ["CWE-125"],
+    "remediation": "Upgrade to OpenSSL >= 1.0.1g"
+  },
+  {
+    "cpe_contains": "wordpress:wordpress",
+    "cve_id": "CVE-2022-21661",
+    "title": "WordPress SQL Injection via WP_Query",
+    "severity": "HIGH",
+    "cvss_v3": 8.8,
+    "description": "WordPress 3.7–5.8.3 is vulnerable to SQL injection via WP_Query in certain plugin/theme contexts.",
+    "cwe_ids": ["CWE-89"],
+    "remediation": "Upgrade to WordPress >= 5.8.3"
+  },
+  {
+    "cpe_contains": "php:php:5",
+    "cve_id": "CVE-2019-11043",
+    "title": "PHP-FPM Remote Code Execution (nginx env_path_info)",
+    "severity": "CRITICAL",
+    "cvss_v3": 9.8,
+    "description": "PHP-FPM in certain nginx configurations allows remote attackers to execute code via crafted URL.",
+    "cwe_ids": ["CWE-119"],
+    "remediation": "Upgrade PHP to 7.3.11+, 7.2.24+, or 7.1.33+"
+  }
+]
