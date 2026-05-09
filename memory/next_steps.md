@@ -7,22 +7,14 @@ All backend + frontend complete. Key fixes this final session:
 - Technologies tab now shows which subdomains each tech came from (expandable rows)
 - Dashboard UI polish: new `/home` Dashboard page, nav restructured, breadcrumbs corrected, Add Scan / Recon Jobs layout cleaned up
 
-## Next Milestone: M5 — Enrichment + Search
+## M5 — COMPLETE (2026-05-09)
 
-### Censys / Shodan integrations
-- Rate-limited, cached per-target-per-day
-- New adapters: `backend/app/pipeline/adapters/censys.py`, `shodan.py`
-- Requires API key env vars: `CENSYS_API_ID`, `CENSYS_API_SECRET`, `SHODAN_API_KEY`
+Censys, Shodan, BBOT adapters + heavy-worker infra done. 17 unit tests passing.
+To activate: rebuild worker + heavy-worker images, set `CENSYS_API_ID`, `CENSYS_API_SECRET`, `SHODAN_API_KEY` in env.
 
-### BBOT integration
-- Deep profile only, isolated worker pool
-- Recursive passive + active recon
-- Heavy resource consumer — needs separate `heavy` queue in Arq
+OpenSearch deferred to future update.
 
-### OpenSearch full-text asset search
-- Index assets by `canonical_key + type + attributes`
-- `GET /search?q=...` endpoint
-- New service: `backend/app/services/search.py`
+## Next Milestone: M6 — (TBD)
 
 ## One-time Ops (do before demo)
 - Run screenshot URL fix SQL (see active_tasks.md) — fixes pre-M2-fix scans with `minio:9000` internal URLs

@@ -20,6 +20,8 @@ dependencies = [
     "sse-starlette>=2.0",
     "maxminddb>=2.6",
     "minio>=7.2",
+    "censys>=2.2",
+    "shodan>=1.31",
 ]
 
 [project.optional-dependencies]
