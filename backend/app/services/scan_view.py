@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Asset, AssetObservation
 from app.models.finding import Finding
+from app.models.service import Service
+from app.models.technology import Technology
 from app.services import storage
 from app.schemas.findings import FindingRow
 from app.schemas.subdomain_view import (
@@ -117,35 +119,36 @@ def _merge_ip_attrs(
 
 
 async def build_port_rows(db: AsyncSession, scan_id: UUID) -> list[PortRow]:
-    """Build port/service rows from `service` type assets for a scan."""
-    service_assets = await _load_assets(db, scan_id, "service")
-    service_obs = await _load_observations_for_scan(db, scan_id, "service")
+    """Build port/service rows from the first-class `services` table.
+
+    Scoped to this scan via asset_observations — only services first detected in (or
+    re-observed during) this scan are included. Replaces the old JSONB-walking path.
+    """
+    # Subquery: asset_ids for service-type assets observed in this scan
+    svc_asset_ids_sq = (
+        select(AssetObservation.asset_id)
+        .join(Asset, Asset.id == AssetObservation.asset_id)
+        .where(AssetObservation.scan_id == scan_id, Asset.type == "service")
+        .distinct()
+        .scalar_subquery()
+    )
+
+    services = (
+        await db.scalars(select(Service).where(Service.asset_id.in_(svc_asset_ids_sq)))
+    ).all()
 
     rows: list[PortRow] = []
-    for asset in service_assets:
-        # canonical_key format: "{host}:{port}/{proto}"
-        try:
-            host_part, rest = asset.canonical_key.rsplit(":", 1)
-            port_str, proto = rest.split("/", 1)
-            port = int(port_str)
-        except (ValueError, IndexError):
-            continue
-
-        # Merge naabu + nmap observations (nmap enriches with service_name/product/version)
-        merged: dict[str, Any] = {}
-        for tool in _SERVICE_TOOLS:
-            merged.update(service_obs.get(asset.id, {}).get(tool, {}))
-
+    for svc in services:
         rows.append(
             PortRow(
-                asset_id=asset.id,
-                host=host_part,
-                port=port,
-                proto=proto,
-                state=merged.get("state") or "open",
-                service_name=merged.get("service_name") or None,
-                product=merged.get("product") or None,
-                version=merged.get("version") or None,
+                asset_id=svc.asset_id,
+                host=svc.host,
+                port=svc.port,
+                proto=svc.proto,
+                state=svc.state,
+                service_name=svc.service_name,
+                product=svc.product,
+                version=svc.version,
             )
         )
     return sorted(rows, key=lambda r: (r.host, r.port))
@@ -399,15 +402,37 @@ async def build_cdn_waf_summary(db: AsyncSession, scan_id: UUID) -> CdnWafSummar
 
 
 async def build_technologies(db: AsyncSession, scan_id: UUID) -> list[TechBucket]:
-    rows = await build_subdomain_rows(db, scan_id)
+    """Build technology buckets from the first-class `technologies` table.
+
+    Scoped to http_service assets observed in this scan. Groups by tech name and
+    attaches the list of URLs (canonical_key) that carry the tech.
+    """
+    http_asset_ids_sq = (
+        select(AssetObservation.asset_id)
+        .join(Asset, Asset.id == AssetObservation.asset_id)
+        .where(AssetObservation.scan_id == scan_id, Asset.type == "http_service")
+        .distinct()
+        .scalar_subquery()
+    )
+
+    # Join Technology to Asset so we can return the URL (canonical_key) per tech
+    tech_rows = (
+        await db.execute(
+            select(Technology.name, Asset.canonical_key)
+            .join(Asset, Asset.id == Technology.asset_id)
+            .where(Technology.asset_id.in_(http_asset_ids_sq))
+            .order_by(Technology.name)
+        )
+    ).all()
+
     counter: dict[str, int] = defaultdict(int)
-    tech_subs: dict[str, list[str]] = defaultdict(list)
-    for r in rows:
-        for t in r.tech:
-            counter[t] += 1
-            tech_subs[t].append(r.subdomain)
+    tech_urls: dict[str, list[str]] = defaultdict(list)
+    for name, url in tech_rows:
+        counter[name] += 1
+        tech_urls[name].append(url)
+
     return [
-        TechBucket(label=k, count=v, subdomains=sorted(tech_subs[k]))
+        TechBucket(label=k, count=v, subdomains=sorted(tech_urls[k]))
         for k, v in sorted(counter.items(), key=lambda kv: -kv[1])[:200]
     ]
 

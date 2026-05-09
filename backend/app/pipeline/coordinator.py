@@ -97,6 +97,12 @@ async def execute_dag(
                 domain=domain,
                 inputs={t: sorted(produced.get(t, set())) for t in stage.inputs},
             )
+            # Conditional gate: stages may declare an applies(ctx) predicate to skip
+            # themselves when their required inputs are absent (e.g. no WordPress tech).
+            applies_fn = getattr(stage, "applies", None)
+            if applies_fn is not None and not applies_fn(ctx):
+                await on_skip(stage, "no_matching_inputs")
+                return None
             stage_handle = await on_start(stage)
             try:
                 records = await stage.execute(ctx)

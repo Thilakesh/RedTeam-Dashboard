@@ -50,3 +50,8 @@ class Stage(Protocol):
     authz_required: bool
 
     async def execute(self, ctx: StageContext) -> list[AssetRecord]: ...
+
+    # Optional. If defined, the coordinator calls it after building the StageContext and
+    # skips the stage (reason="no_matching_inputs") if it returns False. Use for
+    # service-centric vuln stages that are irrelevant when their target tech is absent.
+    # def applies(self, ctx: StageContext) -> bool: ...
