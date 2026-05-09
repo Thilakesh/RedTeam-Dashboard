@@ -14,104 +14,96 @@
 ### M2 — Active Scanning + Isolation
 ✅ Fully complete (backend + frontend) — 2026-05-08
 
-**What's in M2:**
-- Active adapters: naabu, nmap, gowitness (`authz_required=True`)
-- MinIO screenshot storage with presigned URL support (`MINIO_USE_SIGNED_URLS` toggle)
-- Worker subprocess sandbox (`backend/app/workers/sandbox.py`): RLIMIT_NOFILE=4096 only
-- AuthzVerifierStage: L0, auto-verifies target via HTTP well-known + DNS TXT, flips `authz_state[0]=True`
-- `target_authz_verified` exposed on `ScanOut` — UI shows ⚠️ for deep scans on unverified targets
-
-**Critical bug fixed (2026-05-08):**
-- `RLIMIT_AS=768MB` in sandbox.py was killing Go binaries (naabu, gowitness) via SIGABRT at startup
-- Fix: removed `RLIMIT_AS` entirely, raised `RLIMIT_NOFILE` from 512 → 4096
-
 ### M3 — AI Risk Prioritization
-✅ Fully complete (backend + frontend) — 2026-05-07
+✅ Fully complete — 2026-05-07
 
 ### M4 — Workflow-Oriented Dashboard Redesign
-✅ Fully complete (backend + frontend) — 2026-05-08
-
-**Backend changes:**
-- `queued` and `stopped` statuses added to `ScanStatus` ENUM (Alembic migration applied)
-- `autostart: bool = True` on `POST /scans`; `False` creates scan as `queued` without enqueuing
-- New lifecycle endpoints: `POST /scans/{id}/start`, `POST /scans/{id}/stop`, `PATCH /scans/{id}`, `DELETE /scans/{id}`
-- Worker guards completion/failure paths against overriding `stopped` status
-- SSE stream terminates on `scan.stopped` event
-
-**Frontend changes:**
-- `frontend/lib/api.ts` — Scan.status extended to 6 values; lifecycle helpers; `TechBucket` type added
-- `frontend/components/AppShell.tsx` — Dashboard nav item (`/home`); breadcrumbs fixed for all routes
-- `frontend/app/dashboard/layout.tsx` — bare AppShell wrapper only (no stats bar)
-- `frontend/app/dashboard/page.tsx` — "Add Scan" title + description heading
-- `frontend/app/dashboard/recon-jobs/page.tsx` — "Recon Jobs" title + 4-column stats grid
-- `frontend/app/home/page.tsx` — new empty Dashboard placeholder page at `/home`
-- `frontend/components/tabs/OverviewTab.tsx` — Top Risks card for completed deep scans
-- `frontend/components/tabs/TechnologiesTab.tsx` — expandable rows showing subdomains per tech
-
-**M4 bug fixes (2026-05-08 session):**
-- Screenshot URL fallback: `_resolve_screenshot_url()` now falls back to stored `screenshot_url` when backend has no MinIO env vars
-- Technologies tab: `TechBucket` schema with `subdomains: list[str]`; `build_technologies()` collects FQDN list per tech
+✅ Fully complete — 2026-05-08
 
 ### M5 — Enrichment (BBOT only)
-✅ Fully complete (backend + frontend) — 2026-05-09
+✅ Fully complete — 2026-05-09
 
-**What's in M5 (final state after Censys/Shodan removal):**
-- `BBOTStage`: deep-profile-only, runs on `heavy` queue, 30-min timeout, domain-scoped filter
-- `heavy-worker` Docker service: worker image + bbot, listens on `ARQ_QUEUE_NAME=heavy`
-- Queue routing: `enqueue_scan(id, profile)` → `heavy` queue for deep, `default` for all others
-- `sources: list[str]` on SubdomainRow — which tools found each subdomain (purple badges in UI)
-- 13 unit tests passing (bbot ×5, queue ×4, bounded_completion ×4)
+### M-Vuln-1 — Vulnerability Schema + Scan-kind Plumbing
+✅ Complete (committed + pushed to `dev_vuln_dash`)
 
-**Final file state:**
-- `backend/app/pipeline/adapters/bbot.py` — BBOTStage
-- `infra/Dockerfile.heavy-worker` — worker + bbot binary
-- `infra/docker-compose.yml` — heavy-worker service; `volumes: - ../backend:/app` on BOTH worker + heavy-worker
-- `backend/app/core/config.py` — bbot_timeout: int = 1800
-- `backend/app/pipeline/profiles.py` — BBOTStage in deep only; no censys/shodan
-- `backend/app/services/queue.py` — profile-based queue routing
-- `backend/app/workers/runner.py` — WorkerSettings.queue_name from ARQ_QUEUE_NAME env
-- `backend/app/schemas/subdomain_view.py` — `sources: list[str] = []` on SubdomainRow
-- `backend/app/services/scan_view.py` — sources populated from observation source_tool keys
+**Schema:**
+- Migrations 0005 (services + technologies promotion), 0006 (vuln tables), 0007 (scan kind/parent/intrusive)
+- New ORM models: `Service`, `Technology`, `Vulnerability`, `VulnEvidence`, `VulnRunMatch`
+- `Scan.kind` (recon|vuln_analysis), `Scan.parent_scan_id` (self-FK SET NULL), `Scan.intrusive`
+- `FindingSeverity` extended: added CRITICAL
+- Postgres ENUM types created explicitly: `vuln_severity`, `vuln_status`, `scan_kind`
+- Partial unique index: prevent concurrent vuln scans per target
 
-**Censys + Shodan removed (2026-05-09):**
-- Deleted: `censys.py`, `shodan.py`, `_cache.py`, `test_censys.py`, `test_shodan.py`
-- Removed from: profiles.py, config.py, pyproject.toml, Dockerfile.worker, docker-compose.yml
+**Behavioral:**
+- `Stage.applies(ctx)` optional predicate; coordinator skips with reason="no_matching_inputs"
+- `upsert_assets()` dual-writes Service rows (type=service) + Technology rows (httpx tech list)
+- `scan_view.build_port_rows()` + `build_technologies()` rewritten to query first-class tables (scan-scoped via `asset_observations.scan_id` subquery)
 
-**Key bug fixes (2026-05-09):**
-- naabu connect scan: `-s c` flag — SYN scan blocked by Cloudflare, connect scan finds all ports
-- heavy-worker bind mount: added `volumes: - ../backend:/app` — was using stale baked image
-- arq module reload: must `docker compose restart worker heavy-worker` after any Python module changes
+### M-Vuln-2 — Vuln Pipeline + Worker + API + UI
+✅ Complete (commit `9c07d34` on `dev_vuln_dash`, pushed) — 2026-05-09
 
-**OpenSearch deferred** to future milestone.
+**Pipeline layer (`backend/app/pipeline/vuln/`):**
+- `VulnStage` Protocol: `name`, `source_tool`, `depends_on`, `weight`, `optional`, `intrusive_required`, async `execute_vuln(ctx) -> list[VulnRecord]`
+- `VulnStageContext` dataclass: pre-loaded frozen recon view (services, technologies, http_services, lookups by id) — READ ONLY
+- `VulnRecord` + `VulnEvidenceRecord` dataclasses
+- `coordinator.py`: `_levels()` topo sort, `load_vuln_context()`, `run_vuln_dag()` with `intrusive_required` + `applies()` gates, `total_weight()` for progress
+- `profiles.py`: `vuln_quick`/`vuln_standard`/`vuln_deep` (all use cpe_matcher + panel_detector + nuclei_safe stub for now)
+- Adapters: `cpe_matcher` (offline CPE→CVE via bundled `data/cpe_rules.json` — 5 rules: Log4Shell, Struts2, Heartbleed, WP SQLi, PHP-FPM), `panel_detector` (async httpx admin/login probe with Semaphore(10), 9 signatures), `nuclei_safe` (STUB returning [], real binary in M-Vuln-3)
 
-**Pipeline verified end-to-end (2026-05-09):**
-- Quick (subfinder only): ✅ 22s
-- Standard (8 stages, no censys/shodan): ✅ 213s
-- Deep (bbot + active stages): ✅ running on heavy-worker, clean stage list confirmed
+**Services:**
+- `services/vulns.py::upsert_vulns()` mirrors `upsert_assets`: ON CONFLICT `uq_vuln_identity`, appends VulnEvidence, upserts VulnRunMatch (new vs seen via prior-scan check), batch 2000
+- `services/vuln_view.py`: `build_vuln_overview()` (severity counts, KEV/CVE counts), `build_vuln_rows()` (paginated, scan-scoped via vuln_run_matches join, severity/status filters)
 
-### Vulnerability Analysis
-⏳ Not started — next milestone (user confirmed, start with brainstorming skill)
+**API (`backend/app/api/`):**
+- `vuln_scans.py` prefix=`/vuln-scans`: POST (validates parent recon completed + same org), GET list (kind=vuln_analysis filter), GET detail (selectinload stages), GET stream (Redis SSE), GET overview, GET vulnerabilities (paginated)
+- `vulns.py` prefix=`/vulns`: PATCH `/{id}` status update; tenant scope via `vulnerability.target_id → Target → Project.org_id`
+- Both routers wired into `main.py`
+
+**Worker (`backend/app/workers/vuln_runner.py`):**
+- `run_vuln_scan()` Arq function: validates scan kind/parent, loads `VulnStageContext` (within db session), then runs DAG outside session (detached SQLAlchemy objects with loaded columns)
+- on_done: `upsert_vulns()` + updates `scan.progress_pct` per stage weight (matches recon runner pattern)
+- `VulnWorkerSettings`: queue_name="vuln", job_timeout=45min, max_jobs=4
+- `services/queue.py::enqueue_vuln_scan()` routes to "vuln" queue
+
+**Infra:**
+- `infra/Dockerfile.vuln_worker` — python:3.11-slim, nuclei v3.2.4 + nmap, no chromium, CMD `arq vuln_runner.VulnWorkerSettings`
+- `infra/docker-compose.yml` — new `vuln-worker` service (DATABASE_URL/REDIS_URL/OPENROUTER_API_KEY env, `restart: unless-stopped`)
+
+**Frontend:**
+- `frontend/lib/api.ts` — added `VulnScanOut`, `VulnScanDetail`, `VulnOverview`, `VulnOut`, `VulnsPage` types
+- `frontend/app/vuln-scans/page.tsx` — list view with 4s polling on running, status badges, target/profile/status/progress columns, empty state, links
+- `frontend/app/vuln-scans/[id]/page.tsx` — detail view, SSE subscription on Redis channel, Overview tab (severity cards + KEV/CVE summary), Vulnerabilities tab (paginated table with severity/status filters, inline status change PATCH), Suspense wrapper for useSearchParams, ?tab= URL param
+- `frontend/app/scans/[id]/page.tsx` — "Run Vulnerability Analysis" CTA on completed recon scans (POST /vuln-scans, navigate to /vuln-scans/{id})
+
+### M-Vuln-3 — Real Nuclei + More Safe Stages
+⏳ Not started
+
+### M-Vuln-4 — Intrusive Stages
+⏳ Not started
 
 ## Current Architecture Decisions
-- Docker Compose monolith (no k8s until outgrows single host)
-- Arq + Redis for async job queue; `heavy` queue for deep-profile scans (BBOTStage)
-- PostgreSQL asset graph (`Asset` + `AssetObservation` + `Finding`)
-- MinIO (S3-compatible) for screenshots/binary blobs
-- SSE for real-time scan progress (not WebSockets)
-- AI: OpenRouter `openai/gpt-oss-20b:free` for JSON-mode LLM (no parse retries)
-- `RiskPrioritizerStage` and `AuthzVerifierStage` are documented exceptions to "adapters never touch DB" rule
-- Tenant isolation on findings: enforced via `scan_id → scans.org_id`
-- Tab state in Scan Detail driven by `?tab=` URL param (VALID_TABS allowlist guard)
-- Dashboard nav: "Dashboard" (`/home`) + "Basic Recon" (collapsed group: "Add Scan", "Recon Jobs")
-- `layout.tsx` provides AppShell for entire `/dashboard` subtree; child pages manage their own title+stats
-- Scan lifecycle: `queued → created → running → completed/failed/stopped`
-- `bounded_completion.py` null-content guard: null content from OpenRouter raises `BoundedCompletionError` with `finish_reason` context
-- **Sandbox rule**: NEVER use `RLIMIT_AS` for Go-based recon tools — use `RLIMIT_NOFILE` instead
-- **Screenshot URL rule**: backend API has NO MinIO env vars; `_resolve_screenshot_url()` must fall back to stored URL when regen returns None
-- **Naabu rule**: always use `-s c` (connect scan) — SYN scan is silently blocked by Cloudflare and returns 0–4 ports
-- **Env var rule**: `docker-compose.yml` `${VAR:-}` takes priority over Pydantic `.env`; add real secrets to `infra/.env` (gitignored)
-- **arq reload rule**: after any Python module change, must `docker compose restart worker heavy-worker` — arq loads modules at startup, bind mount alone does not trigger reload
-- **heavy-worker bind mount rule**: both `worker` and `heavy-worker` must have `volumes: - ../backend:/app` in docker-compose.yml for dev hot-swap
+- Docker Compose monolith (no k8s yet)
+- Arq + Redis: `default` queue (recon non-deep), `heavy` queue (recon deep + bbot), `vuln` queue (vuln_analysis)
+- PostgreSQL asset graph (`Asset` + `AssetObservation` + `Finding`) + first-class `Service`/`Technology` (M-Vuln-1) + `Vulnerability`/`VulnEvidence`/`VulnRunMatch` (M-Vuln-1)
+- MinIO for screenshots
+- SSE for real-time scan progress (Redis pub/sub `scan:{scan_id}`, same shape for recon + vuln)
+- AI: OpenRouter `openai/gpt-oss-20b:free` JSON mode
+- `RiskPrioritizerStage`, `AuthzVerifierStage` are documented exceptions to "adapters never touch DB"
+- Tenant isolation: `Scan.org_id` denormalized; vulns scoped via target→project chain
+- Tab state via `?tab=` URL param + VALID_TABS allowlist
+- Scan kind separation: vuln_analysis scans require completed parent recon scan, run on `vuln` queue, get separate frontend route `/vuln-scans/[id]`
+- Vuln dedup identity: `(target_id, canonical_key)` unique; `canonical_key` formula varies by source (e.g. `cve:{cve_id}:{asset_id}`)
+- VulnEvidence is append-only; VulnRunMatch tracks per-scan new/seen state for diff view
+- VulnStageContext is detached SQLAlchemy objects (column attrs loaded, no lazy relationships) — frozen view, prevents recon re-runs
+
+## Carry-forward Rules (stable)
+- **Sandbox**: NEVER use `RLIMIT_AS` for Go binaries — SIGABRT at startup; use `RLIMIT_NOFILE`
+- **Naabu**: always use `-s c` (connect scan); SYN blocked by Cloudflare
+- **Screenshot**: backend API has no MinIO env vars — `_resolve_screenshot_url()` falls back to stored URL
+- **Env**: `infra/.env` is secret source of truth; `${VAR:-}` in compose overrides Pydantic `.env`
+- **arq reload**: `docker compose restart worker heavy-worker vuln-worker` after Python module changes — bind mount alone does not reload
+- **Bind mount**: all worker services need `volumes: - ../backend:/app` for dev hot-swap
+- **Vuln module boundary**: vuln adapters NEVER write to `assets`/`services`/`technologies` — they consume the frozen `VulnStageContext` only
 
 ## Current Focus
-M5 complete + verified. Pipeline clean (all 3 profiles confirmed working). PR at https://github.com/Thilakesh/RedTeam-Dashboard/compare/main...dev_BlackPie (create manually — gh CLI not installed). Next: **Vulnerability Analysis** feature — start with brainstorming skill.
+M-Vuln-1 + M-Vuln-2 done. `dev_vuln_dash` branch pushed. PR creation pending (gh CLI missing). Next: **M-Vuln-3** — wire real nuclei binary, add testssl/nmap_nse_vuln/default_creds_matcher/katana/correlator/ai_triage stages, Diff tab in UI.
