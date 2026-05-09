@@ -41,6 +41,7 @@ class NaabuStage:
             binary,
             "-host", ",".join(hosts),
             "-top-ports", "1000",
+            "-s", "c",            # connect scan — works through Cloudflare (SYN is blocked)
             "-silent",
             "-json",
             "-disable-update-check",

@@ -16,9 +16,9 @@ def _make_shodan_mock(domain_return=None, domain_side_effect=None):
     """Build a fake shodan module with a Shodan class."""
     mock_api_instance = MagicMock()
     if domain_side_effect is not None:
-        mock_api_instance.dns.domain.side_effect = domain_side_effect
+        mock_api_instance.dns.domain_info.side_effect = domain_side_effect
     else:
-        mock_api_instance.dns.domain.return_value = domain_return or {}
+        mock_api_instance.dns.domain_info.return_value = domain_return or {}
 
     mock_shodan_cls = MagicMock(return_value=mock_api_instance)
 

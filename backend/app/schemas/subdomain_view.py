@@ -38,6 +38,7 @@ class SubdomainRow(BaseModel):
     server: str | None = None
     tech: list[str] = []
     open_ports: list[str] = []       # e.g. ["80/tcp", "443/tcp"]
+    sources: list[str] = []          # tools that discovered this subdomain, e.g. ["subfinder", "shodan"]
     screenshot_url: str | None = None
     url: str | None = None
     first_seen: datetime

@@ -97,6 +97,32 @@ export function SubdomainsTable({ scanId }: { scanId: string }) {
         },
       },
       {
+        id: "sources",
+        header: "Sources",
+        size: 160,
+        cell: ({ row }) => {
+          const srcs = row.original.sources ?? [];
+          if (srcs.length === 0) return <span className="text-muted-foreground">—</span>;
+          const ENRICHMENT = new Set(["censys", "shodan", "bbot", "amass"]);
+          return (
+            <div className="flex flex-wrap gap-1">
+              {srcs.map((s) => (
+                <span
+                  key={s}
+                  className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    ENRICHMENT.has(s)
+                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {s}
+                </span>
+              ))}
+            </div>
+          );
+        },
+      },
+      {
         accessorKey: "title",
         header: "Title",
         cell: ({ row }) => (

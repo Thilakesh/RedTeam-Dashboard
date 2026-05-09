@@ -34,7 +34,7 @@ class ShodanStage:
         try:
             import shodan as shodan_lib
             api = shodan_lib.Shodan(settings.shodan_api_key)
-            result = api.dns.domain(ctx.domain, history=False, type="A", page=1)
+            result = api.dns.domain_info(ctx.domain)
             records = self._parse(result, ctx.domain)
         except Exception as exc:
             log.warning("shodan: API error for %s, skipping: %s", ctx.domain, exc)
