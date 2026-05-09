@@ -1,3 +1,9 @@
+"""Subfinder — primary passive subdomain enumeration.
+
+Uses streaming to collect results as they arrive. On timeout the process is
+killed and whatever was collected is returned — a partial result is better
+than a failed scan, and other L0 tools (assetfinder, amass, bbot) fill gaps.
+"""
 import asyncio
 import shutil
 
@@ -20,37 +26,47 @@ class SubfinderStage:
 
         proc = await asyncio.create_subprocess_exec(
             binary,
-            "-d",
-            ctx.domain,
+            "-d", ctx.domain,
             "-silent",
             "-all",
+            "-timeout", "30",   # per-source HTTP timeout in seconds
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise RuntimeError("subfinder timed out after 120s") from None
-
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"subfinder exited {proc.returncode}: {stderr.decode(errors='replace')[:500]}"
-            )
 
         seen: set[str] = set()
-        records: list[AssetRecord] = []
-        for raw in stdout.decode(errors="replace").splitlines():
-            sub = raw.strip().lower()
-            if not sub or sub in seen:
-                continue
-            seen.add(sub)
-            records.append(
-                AssetRecord(
-                    type="subdomain",
-                    canonical_key=sub,
-                    payload={"source": "subfinder"},
-                    confidence=85,
-                )
+        domain_lower = ctx.domain.lower()
+
+        async def _collect() -> None:
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                host = raw.decode(errors="replace").strip().lower()
+                if host and " " not in host and (
+                    host.endswith(f".{domain_lower}") or host == domain_lower
+                ):
+                    seen.add(host)
+            await proc.wait()
+
+        try:
+            await asyncio.wait_for(_collect(), timeout=300)
+        except asyncio.TimeoutError:
+            # Kill and return partial results rather than failing the scan.
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
+
+        # Non-zero exit is normal when some passive sources fail; ignore it.
+        return [
+            AssetRecord(
+                type="subdomain",
+                canonical_key=host,
+                payload={"source": "subfinder"},
+                confidence=85,
             )
-        return records
+            for host in seen
+        ]
