@@ -10,6 +10,7 @@ own short-lived session.
 """
 
 import json
+import os
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -177,5 +178,6 @@ class WorkerSettings:
     functions = [run_scan]
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    queue_name = os.getenv("ARQ_QUEUE_NAME", "default")
     job_timeout = 60 * 30
     max_jobs = 4

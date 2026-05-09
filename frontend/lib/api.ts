@@ -119,6 +119,7 @@ export type SubdomainRow = {
   tech: string[];
   url: string | null;
   open_ports: string[];
+  sources: string[];
   screenshot_url: string | null;
   first_seen: string;
   last_seen: string;

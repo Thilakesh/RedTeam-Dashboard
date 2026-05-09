@@ -1,0 +1,127 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libpq-dev curl ca-certificates unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# subfinder (ProjectDiscovery) — pinned binary release
+ARG SUBFINDER_VERSION=2.6.6
+RUN curl -fsSL -o /tmp/subfinder.zip \
+        "https://github.com/projectdiscovery/subfinder/releases/download/v${SUBFINDER_VERSION}/subfinder_${SUBFINDER_VERSION}_linux_amd64.zip" \
+    && unzip -o /tmp/subfinder.zip -d /usr/local/bin/ \
+    && rm /tmp/subfinder.zip \
+    && chmod +x /usr/local/bin/subfinder \
+    && subfinder -version
+
+# assetfinder (tomnomnom) — passive subdomain enum, complements subfinder
+ARG ASSETFINDER_VERSION=0.1.1
+RUN curl -fsSL -o /tmp/assetfinder.tgz \
+        "https://github.com/tomnomnom/assetfinder/releases/download/v${ASSETFINDER_VERSION}/assetfinder-linux-amd64-${ASSETFINDER_VERSION}.tgz" \
+    && tar -xzf /tmp/assetfinder.tgz -C /usr/local/bin/ \
+    && rm /tmp/assetfinder.tgz \
+    && chmod +x /usr/local/bin/assetfinder \
+    && assetfinder --help >/dev/null
+
+# dnsx (ProjectDiscovery) — DNS resolver for the subdomain set
+ARG DNSX_VERSION=1.2.0
+RUN curl -fsSL -o /tmp/dnsx.zip \
+        "https://github.com/projectdiscovery/dnsx/releases/download/v${DNSX_VERSION}/dnsx_${DNSX_VERSION}_linux_amd64.zip" \
+    && unzip -o /tmp/dnsx.zip -d /usr/local/bin/ \
+    && rm /tmp/dnsx.zip \
+    && chmod +x /usr/local/bin/dnsx \
+    && dnsx -version
+
+# httpx (ProjectDiscovery) — HTTP probe for live web services. Renamed to `pdhttpx`
+# because the Python `httpx` library (transitive pip dep) installs its own `httpx` CLI
+# script that would shadow this binary on PATH.
+ARG HTTPX_VERSION=1.6.0
+RUN curl -fsSL -o /tmp/httpx.zip \
+        "https://github.com/projectdiscovery/httpx/releases/download/v${HTTPX_VERSION}/httpx_${HTTPX_VERSION}_linux_amd64.zip" \
+    && unzip -o /tmp/httpx.zip -d /tmp/httpx-extract/ \
+    && mv /tmp/httpx-extract/httpx /usr/local/bin/pdhttpx \
+    && rm -rf /tmp/httpx.zip /tmp/httpx-extract \
+    && chmod +x /usr/local/bin/pdhttpx \
+    && pdhttpx -version
+
+# OWASP Amass — backup passive subdomain enumerator alongside subfinder/assetfinder.
+# Releases ship as tar.gz with the binary at the archive root in v5+.
+ARG AMASS_VERSION=5.1.1
+RUN curl -fsSL -o /tmp/amass.tgz \
+        "https://github.com/owasp-amass/amass/releases/download/v${AMASS_VERSION}/amass_linux_amd64.tar.gz" \
+    && tar -xzf /tmp/amass.tgz -C /tmp/ \
+    && find /tmp -maxdepth 3 -name amass -type f -executable -exec mv {} /usr/local/bin/amass \; \
+    && rm -rf /tmp/amass.tgz /tmp/amass_linux_amd64 \
+    && chmod +x /usr/local/bin/amass \
+    && amass -version 2>&1 | head -3 || true
+
+# asnmap (ProjectDiscovery) — IP → ASN/Org lookup, requires PDCP_API_KEY at runtime.
+ARG ASNMAP_VERSION=1.1.1
+RUN curl -fsSL -o /tmp/asnmap.zip \
+        "https://github.com/projectdiscovery/asnmap/releases/download/v${ASNMAP_VERSION}/asnmap_${ASNMAP_VERSION}_linux_amd64.zip" \
+    && unzip -o /tmp/asnmap.zip -d /usr/local/bin/ \
+    && rm /tmp/asnmap.zip \
+    && chmod +x /usr/local/bin/asnmap \
+    && asnmap -version
+
+# wafw00f — fingerprints WAFs in front of HTTP services. Pure Python, install via pip.
+RUN pip install --no-cache-dir wafw00f==2.3.0 \
+    && wafw00f --help >/dev/null
+
+# dbip-city-lite — local IP → Country/City MMDB. CC BY 4.0, no signup, monthly refresh.
+# We pin the YYYY-MM in the URL so reproducible builds don't drift; bump it monthly if you care.
+ARG DBIP_MONTH=2026-05
+RUN mkdir -p /opt/geoip \
+    && curl -fsSL -o /opt/geoip/dbip-city-lite.mmdb.gz \
+        "https://download.db-ip.com/free/dbip-city-lite-${DBIP_MONTH}.mmdb.gz" \
+    && gunzip /opt/geoip/dbip-city-lite.mmdb.gz \
+    && ls -lh /opt/geoip/dbip-city-lite.mmdb
+
+# naabu (ProjectDiscovery) — fast port scanner. Active stage, requires authz gate.
+# Requires libpcap at runtime (naabu uses raw sockets for SYN scanning).
+# libpcap-dev pulls in libpcap0.8t64 (Debian Trixie) or libpcap0.8 (Bookworm),
+# both of which provide the libpcap.so.0.8 symlink that the naabu binary links against.
+ARG NAABU_VERSION=2.3.3
+RUN apt-get update && apt-get install -y --no-install-recommends libpcap-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL -o /tmp/naabu.zip \
+            "https://github.com/projectdiscovery/naabu/releases/download/v${NAABU_VERSION}/naabu_${NAABU_VERSION}_linux_amd64.zip" \
+    && unzip -o /tmp/naabu.zip naabu -d /usr/local/bin/ \
+    && rm /tmp/naabu.zip \
+    && chmod +x /usr/local/bin/naabu \
+    && naabu -version
+
+# nmap — service/version detection on ports discovered by naabu.
+RUN apt-get update && apt-get install -y --no-install-recommends nmap \
+    && rm -rf /var/lib/apt/lists/* \
+    && nmap --version | head -1
+
+# Chromium — headless browser required by gowitness for screenshots.
+# Install fonts alongside chromium so pages render text correctly (not tofu).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        chromium chromium-driver \
+        fonts-liberation fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# gowitness v2.4.2 — last stable v2 release; v3 changed the CLI interface.
+# v2 binary naming: gowitness-{VERSION}-linux-amd64 (NOT just "gowitness").
+ARG GOWITNESS_VERSION=2.4.2
+RUN curl -fsSL -o /usr/local/bin/gowitness \
+        "https://github.com/sensepost/gowitness/releases/download/${GOWITNESS_VERSION}/gowitness-${GOWITNESS_VERSION}-linux-amd64" \
+    && chmod +x /usr/local/bin/gowitness \
+    && gowitness version || true
+
+COPY backend/pyproject.toml ./pyproject.toml
+RUN pip install --upgrade pip && pip install .
+
+# BBOT — heavy-worker specific passive recon tool
+RUN pip install --no-cache-dir bbot && bbot --version
+
+COPY backend/ ./
+
+CMD ["arq", "app.workers.runner.WorkerSettings"]

@@ -95,7 +95,7 @@ async def create_scan(
     await db.refresh(scan)
 
     if req.autostart:
-        await enqueue_scan(str(scan.id))
+        await enqueue_scan(str(scan.id), profile=scan.profile)
 
     return _to_scan_out(scan, target.domain, target.authorization_verified_at is not None)
 
@@ -128,7 +128,7 @@ async def start_scan(
         raise HTTPException(status.HTTP_409_CONFLICT, "Scan is not in queued state")
     scan.status = ScanStatus.created
     await db.commit()
-    await enqueue_scan(str(scan.id))
+    await enqueue_scan(str(scan.id), profile=scan.profile)
     return _to_scan_out(scan, domain, authz_verified)
 
 

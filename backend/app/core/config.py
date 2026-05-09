@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "recon"
     openrouter_api_key: str = ""          # required for deep scans; set via OPENROUTER_API_KEY env
+    bbot_timeout: int = 1800
 
 
 @lru_cache

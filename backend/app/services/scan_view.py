@@ -258,6 +258,7 @@ async def build_subdomain_rows(db: AsyncSession, scan_id: UUID) -> list[Subdomai
                 server=httpx.get("server") or None,
                 tech=list(httpx.get("tech") or []),
                 open_ports=sorted(port_lookup.get(asset.canonical_key, [])),
+                sources=sorted(payloads.keys()),
                 screenshot_url=screenshot_lookup.get(asset.canonical_key),
                 url=httpx.get("input") and httpx.get("scheme") and f"{httpx['scheme']}://{httpx['input']}" or None,
                 first_seen=asset.first_seen,
