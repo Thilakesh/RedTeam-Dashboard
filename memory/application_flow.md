@@ -7,6 +7,10 @@ User submits scan (POST /scans)
   → autostart=true (default): Arq job enqueued (services/queue.py), status=created
   → autostart=false: status=queued, no enqueue (user-deferred)
 
+  Queue routing (services/queue.py):
+  → profile="deep" → _queue_name="heavy" (heavy-worker picks up)
+  → profile="quick"|"standard" → _queue_name="default" (worker picks up)
+
   Queued scan management:
   → POST /scans/{id}/start  → status=created, enqueued
   → PATCH /scans/{id}       → update profile (queued only)
@@ -21,12 +25,13 @@ User submits scan (POST /scans)
     → builds stage list from profile (pipeline/profiles.py)
     → execute_dag() (pipeline/coordinator.py)
       → topological sort → parallel execution levels
-      → L0: subfinder + assetfinder (parallel)
+      → L0: subfinder + assetfinder (parallel, passive)
       → L1: amass, dnsx (after L0)
       → L2: httpx + asnmap + geoip (parallel, after dnsx)
       → L3: wafw00f (after httpx)
       → [deep only, authz_required=True] L4: naabu → L5: nmap → L6: gowitness
       → [deep only] L7: risk_prioritizer (optional=True, depends_on=["gowitness"])
+      → [deep only, heavy queue] BBOTStage runs concurrently with passive stages
       → if stage.authz_required=True and not authorization_verified → skip (not fail)
       → if stage.optional=True and stage raises → mark failed, scan continues
     → each stage: on_start() → execute() → on_done()/on_fail()/on_skip()
@@ -76,6 +81,7 @@ Stage returns list[AssetRecord]
 - `canonical_key` per type: subdomain=FQDN, ipv4=dotted-quad, service=host:port/proto, screenshot=FQDN
 - One Asset row per unique (target_id, type, canonical_key) — accumulates across scans
 - One AssetObservation per (asset, scan) — provides per-scan history for diff (future)
+- `upsert_assets()` calls `flush()` not `commit()` — caller must `await db.commit()` explicitly
 
 ## Data Flow: Risk Findings
 
@@ -127,13 +133,28 @@ Key env vars (worker service):
 - `MINIO_URL=http://minio:9000` — internal Docker URL for SDK connections
 - `MINIO_PUBLIC_URL=http://localhost:9000` — browser-accessible URL for generated links
 - `OPENROUTER_API_KEY=sk-or-v1-...` — required for deep scans; `BoundedCompletionError` raised at call time if empty
-
 **Backend API container has NO MinIO env vars** — intentional. All MinIO work happens in the worker.
+
+**Secret resolution order** (highest priority wins):
+1. Shell environment variables (e.g., CI secrets)
+2. `infra/.env` (read by docker-compose, gitignored)
+3. `backend/.env` (read by Pydantic Settings, gitignored)
+`infra/.env` is the effective source for Docker services; `backend/.env` is only used when running backend directly (e.g., tests outside Docker).
+
+## Enrichment Adapters (M5)
+
+```
+BBOTStage (optional=True, deep only, heavy queue, 30-min timeout):
+  → asyncio subprocess: bbot -t {domain} -m subdomain-enum -o json
+  → parses DNS_NAME + IP_ADDRESS events from stdout
+  → domain filter: FQDN must end with .{domain} or == domain
+  → returns AssetRecord[] (type=subdomain + ipv4)
+```
 
 ## Read Model (denormalized views)
 
 ```
-GET /scans/{id}/subdomains   → SubdomainRow[] (joined: http, ip, waf, cdn, tech, server)
+GET /scans/{id}/subdomains   → SubdomainRow[] (joined: http, ip, waf, cdn, tech, server, sources)
 GET /scans/{id}/overview     → ScanOverview (counts, distributions)
 GET /scans/{id}/ips          → IpRow[]
 GET /scans/{id}/cdn-waf      → CdnWafSummary
@@ -144,6 +165,8 @@ GET /scans/{id}/findings     → FindingsPage (FindingRow[], ordered by priority
                                returns {"total": 0, "items": []} (not 404) when no findings
                                tenant-scoped via _ensure_scan_visible()
 ```
+
+SubdomainRow.sources: `list[str]` — sorted list of source_tool values from asset_observations for this subdomain+scan. Purple badges in UI for enrichment tools (bbot, amass); grey for passive (subfinder, assetfinder).
 
 ## Worker Subprocess Sandbox
 
@@ -156,11 +179,13 @@ GET /scans/{id}/findings     → FindingsPage (FindingRow[], ordered by priority
 
 ## Profiles
 
-| Profile  | Stages                                                                              | authz needed |
-|----------|-------------------------------------------------------------------------------------|-------------|
-| quick    | subfinder                                                                           | No          |
-| standard | subfinder, assetfinder, amass, dnsx, httpx, asnmap, geoip, wafw00f                 | No          |
-| deep     | authz_verifier (L0) + standard + naabu, nmap, gowitness, risk_prioritizer           | Yes (active)|
+| Profile  | Stages                                                                                             | authz needed | Queue   |
+|----------|----------------------------------------------------------------------------------------------------|-------------|---------|
+| quick    | subfinder                                                                                          | No          | default |
+| standard | subfinder, assetfinder, amass, dnsx, httpx, asnmap, geoip, wafw00f                               | No          | default |
+| deep     | authz_verifier (L0) + standard + bbot + naabu, nmap, gowitness, risk_prioritizer                  | Yes (active)| heavy   |
+
+**naabu must always use `-s c` (connect scan)**: default SYN scan is silently blocked by Cloudflare and returns 0–4 ports. Connect scan finds all open ports.
 
 ## Real-time Updates
 
@@ -178,7 +203,7 @@ GET /scans/{id}/findings     → FindingsPage (FindingRow[], ordered by priority
 /home → Dashboard placeholder (AppShell, empty — future widgets)
 /dashboard → layout.tsx (bare AppShell wrapper) wraps:
   /dashboard          → Add Scan form ([Add] queued, [Start Scan] immediate) + "Add Scan" title
-  /dashboard/recon-jobs → Recon Jobs table + "Recon Jobs" title + 4-column stats grid
+  /dashboard/recon-jobs → Recon Jobs table + "Recon Jobs" title + 4-column stats grid (Total/Running/Completed/Failed)
 /scans/[id] → tabbed Scan Detail
   URL tab selection: ?tab=<value> (VALID_TABS: overview|subdomains|ips|cdnwaf|tech|ports|risks|history)
   tabs: Overview | Subdomains | IP Summary | CDN/WAF | Technologies | Ports | Risks | History (stub)
@@ -209,7 +234,7 @@ GET /scans/{id}/findings     → FindingsPage (FindingRow[], ordered by priority
 | pipeline/adapters/* | Invoke tool, parse output, return AssetRecord[] | Touch DB |
 | agents/risk_prioritizer.py | Read asset graph, call LLM, write findings | Return AssetRecord[] |
 | agents/bounded_completion.py | HTTP call to OpenRouter, parse JSON | Know about DB or stage context |
-| services/assets.py | Upsert Asset + AssetObservation | Run subprocesses |
+| services/assets.py | Upsert Asset + AssetObservation (flush only — caller commits) | Run subprocesses |
 | workers/runner.py | Lifecycle, pub/sub, progress | Business logic |
 | pipeline/coordinator.py | DAG scheduling, parallel execution | Know about Redis |
 | services/scan_view.py | Read-model aggregation + build_findings() | Write to DB |

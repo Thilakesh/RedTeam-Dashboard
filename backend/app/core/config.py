@@ -23,9 +23,6 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "recon"
     openrouter_api_key: str = ""          # required for deep scans; set via OPENROUTER_API_KEY env
-    censys_api_id: str = ""
-    censys_api_secret: str = ""
-    shodan_api_key: str = ""
     bbot_timeout: int = 1800
 
 

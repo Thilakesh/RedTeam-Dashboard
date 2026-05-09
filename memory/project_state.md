@@ -52,43 +52,49 @@
 - Screenshot URL fallback: `_resolve_screenshot_url()` now falls back to stored `screenshot_url` when backend has no MinIO env vars
 - Technologies tab: `TechBucket` schema with `subdomains: list[str]`; `build_technologies()` collects FQDN list per tech
 
-### M5 — Enrichment (Censys + Shodan + BBOT)
-✅ Backend complete — 2026-05-09
+### M5 — Enrichment (BBOT only)
+✅ Fully complete (backend + frontend) — 2026-05-09
 
-**What's in M5:**
-- `CensysStage` + `ShodanStage`: passive L0 adapters with daily Redis cache, optional, skip gracefully if unconfigured
+**What's in M5 (final state after Censys/Shodan removal):**
 - `BBOTStage`: deep-profile-only, runs on `heavy` queue, 30-min timeout, domain-scoped filter
-- `heavy-worker` Docker service: identical to worker + bbot, listens on `ARQ_QUEUE_NAME=heavy`
+- `heavy-worker` Docker service: worker image + bbot, listens on `ARQ_QUEUE_NAME=heavy`
 - Queue routing: `enqueue_scan(id, profile)` → `heavy` queue for deep, `default` for all others
-- 17 unit tests passing (censys ×4, shodan ×4, bbot ×5, queue ×4)
-- SDK imports deferred inside `execute()` so container starts even if censys/shodan not installed yet
+- `sources: list[str]` on SubdomainRow — which tools found each subdomain (purple badges in UI)
+- 13 unit tests passing (bbot ×5, queue ×4, bounded_completion ×4)
 
-**New files:**
-- `backend/app/pipeline/adapters/_cache.py` — Redis daily cache helpers (cache_get/cache_set)
-- `backend/app/pipeline/adapters/censys.py`
-- `backend/app/pipeline/adapters/shodan.py`
-- `backend/app/pipeline/adapters/bbot.py`
-- `infra/Dockerfile.heavy-worker`
-- `backend/tests/unit/test_censys.py`, `test_shodan.py`, `test_bbot.py`, `test_queue.py`
-
-**Modified files:**
-- `backend/app/core/config.py` — added censys_api_id, censys_api_secret, shodan_api_key, bbot_timeout
-- `backend/app/pipeline/profiles.py` — CensysStage+ShodanStage in standard+deep; BBOTStage in deep only
+**Final file state:**
+- `backend/app/pipeline/adapters/bbot.py` — BBOTStage
+- `infra/Dockerfile.heavy-worker` — worker + bbot binary
+- `infra/docker-compose.yml` — heavy-worker service; `volumes: - ../backend:/app` on BOTH worker + heavy-worker
+- `backend/app/core/config.py` — bbot_timeout: int = 1800
+- `backend/app/pipeline/profiles.py` — BBOTStage in deep only; no censys/shodan
 - `backend/app/services/queue.py` — profile-based queue routing
 - `backend/app/workers/runner.py` — WorkerSettings.queue_name from ARQ_QUEUE_NAME env
-- `backend/app/api/scans.py` — both enqueue_scan calls pass profile=scan.profile
-- `backend/pyproject.toml` — added censys>=2.2, shodan>=1.31
-- `infra/Dockerfile.worker` — pip install censys+shodan
-- `infra/docker-compose.yml` — env vars on worker + new heavy-worker service
+- `backend/app/schemas/subdomain_view.py` — `sources: list[str] = []` on SubdomainRow
+- `backend/app/services/scan_view.py` — sources populated from observation source_tool keys
 
-**OpenSearch deferred** to future milestone (removed from M5 scope).
+**Censys + Shodan removed (2026-05-09):**
+- Deleted: `censys.py`, `shodan.py`, `_cache.py`, `test_censys.py`, `test_shodan.py`
+- Removed from: profiles.py, config.py, pyproject.toml, Dockerfile.worker, docker-compose.yml
 
-### M6
-⏳ Not started
+**Key bug fixes (2026-05-09):**
+- naabu connect scan: `-s c` flag — SYN scan blocked by Cloudflare, connect scan finds all ports
+- heavy-worker bind mount: added `volumes: - ../backend:/app` — was using stale baked image
+- arq module reload: must `docker compose restart worker heavy-worker` after any Python module changes
+
+**OpenSearch deferred** to future milestone.
+
+**Pipeline verified end-to-end (2026-05-09):**
+- Quick (subfinder only): ✅ 22s
+- Standard (8 stages, no censys/shodan): ✅ 213s
+- Deep (bbot + active stages): ✅ running on heavy-worker, clean stage list confirmed
+
+### Vulnerability Analysis
+⏳ Not started — next milestone (user confirmed, start with brainstorming skill)
 
 ## Current Architecture Decisions
 - Docker Compose monolith (no k8s until outgrows single host)
-- Arq + Redis for async job queue
+- Arq + Redis for async job queue; `heavy` queue for deep-profile scans (BBOTStage)
 - PostgreSQL asset graph (`Asset` + `AssetObservation` + `Finding`)
 - MinIO (S3-compatible) for screenshots/binary blobs
 - SSE for real-time scan progress (not WebSockets)
@@ -102,6 +108,10 @@
 - `bounded_completion.py` null-content guard: null content from OpenRouter raises `BoundedCompletionError` with `finish_reason` context
 - **Sandbox rule**: NEVER use `RLIMIT_AS` for Go-based recon tools — use `RLIMIT_NOFILE` instead
 - **Screenshot URL rule**: backend API has NO MinIO env vars; `_resolve_screenshot_url()` must fall back to stored URL when regen returns None
+- **Naabu rule**: always use `-s c` (connect scan) — SYN scan is silently blocked by Cloudflare and returns 0–4 ports
+- **Env var rule**: `docker-compose.yml` `${VAR:-}` takes priority over Pydantic `.env`; add real secrets to `infra/.env` (gitignored)
+- **arq reload rule**: after any Python module change, must `docker compose restart worker heavy-worker` — arq loads modules at startup, bind mount alone does not trigger reload
+- **heavy-worker bind mount rule**: both `worker` and `heavy-worker` must have `volumes: - ../backend:/app` in docker-compose.yml for dev hot-swap
 
 ## Current Focus
-All M0–M4 complete. Next: M5 — Enrichment + Search (Censys/Shodan/BBOT/OpenSearch).
+M5 complete + verified. Pipeline clean (all 3 profiles confirmed working). PR at https://github.com/Thilakesh/RedTeam-Dashboard/compare/main...dev_BlackPie (create manually — gh CLI not installed). Next: **Vulnerability Analysis** feature — start with brainstorming skill.
