@@ -1,3 +1,8 @@
+"""Per-asset HVT score from HvtSignal list.
+
+Pure function — no DB, no async. The correlator_engine calls this for each
+vulnerability after loading hvt_signals_by_asset from VulnStageContext.
+"""
 from __future__ import annotations
 
 SIGNAL_WEIGHTS: dict[str, float] = {
