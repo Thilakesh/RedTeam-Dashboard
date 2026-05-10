@@ -3,12 +3,18 @@ from app.pipeline.vuln.adapters.correlator import CorrelatorStage
 from app.pipeline.vuln.adapters.cpe_matcher import CpeMatcherStage
 from app.pipeline.vuln.adapters.default_creds_matcher import DefaultCredsMatcherStage
 from app.pipeline.vuln.adapters.endpoint_classifier import EndpointClassifierStage
+from app.pipeline.vuln.adapters.gitlab_probe import GitlabProbeStage
+from app.pipeline.vuln.adapters.graphql_introspection import GraphqlIntrospectionStage
+from app.pipeline.vuln.adapters.jenkins_probe import JenkinsProbeStage
 from app.pipeline.vuln.adapters.katana import KatanaStage
 from app.pipeline.vuln.adapters.nmap_nse_vuln import NmapNseVulnStage
 from app.pipeline.vuln.adapters.nuclei_safe import NucleiSafeStage
 from app.pipeline.vuln.adapters.panel_detector import PanelDetectorStage
+from app.pipeline.vuln.adapters.struts_checker import StrutsCheckerStage
 from app.pipeline.vuln.adapters.swagger_discoverer import SwaggerDiscovererStage
 from app.pipeline.vuln.adapters.testssl import TestsslStage
+from app.pipeline.vuln.adapters.wp_plugin_check import WpPluginCheckStage
+from app.pipeline.vuln.adapters.wp_user_enum import WpUserEnumStage
 
 
 def _prune_deps(stages: list) -> list:
@@ -42,6 +48,13 @@ def _standard():
         NucleiSafeStage(),
         TestsslStage(),
         NmapNseVulnStage(),
+        # Tech-specific conditional stages — self-gate via required_signals
+        WpUserEnumStage(),
+        WpPluginCheckStage(),
+        StrutsCheckerStage(),
+        JenkinsProbeStage(),
+        GraphqlIntrospectionStage(),
+        GitlabProbeStage(),
         CorrelatorStage(),
         AiTriageStage(),
     ])
@@ -58,6 +71,13 @@ def _deep():
         NucleiSafeStage(),
         TestsslStage(),
         NmapNseVulnStage(),
+        # Tech-specific conditional stages — self-gate via required_signals
+        WpUserEnumStage(),
+        WpPluginCheckStage(),
+        StrutsCheckerStage(),
+        JenkinsProbeStage(),
+        GraphqlIntrospectionStage(),
+        GitlabProbeStage(),
         CorrelatorStage(),
         AiTriageStage(),
     ])
