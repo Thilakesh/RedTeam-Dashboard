@@ -29,10 +29,11 @@ def test_capped_at_one():
 
 
 def test_unknown_signal_type_uses_default_weight():
-    from app.services.hvt_score import compute_hvt_score
+    from app.services.hvt_score import compute_hvt_score, _DEFAULT_WEIGHT
     sig = _sig("totally_unknown_type", score=1.0)
     result = compute_hvt_score([sig])
-    assert 0.0 < result <= 0.35
+    # score=1.0 * _DEFAULT_WEIGHT = 0.30
+    assert abs(result - _DEFAULT_WEIGHT) < 1e-6
 
 
 def test_null_score_treated_as_half():

@@ -5,6 +5,8 @@ vulnerability after loading hvt_signals_by_asset from VulnStageContext.
 """
 from __future__ import annotations
 
+from typing import Any
+
 SIGNAL_WEIGHTS: dict[str, float] = {
     "admin_panel":    0.85,
     "login_form":     0.40,
@@ -27,7 +29,7 @@ SIGNAL_WEIGHTS: dict[str, float] = {
 _DEFAULT_WEIGHT = 0.30
 
 
-def compute_hvt_score(hvt_signals: list) -> float:
+def compute_hvt_score(hvt_signals: list[Any]) -> float:
     """Return composite HVT score for an asset (0.0–1.0).
 
     hvt_signals: list[HvtSignal] (or any objects with .signal_type and .score).
@@ -39,6 +41,6 @@ def compute_hvt_score(hvt_signals: list) -> float:
         # Handle both str and HvtSignalType enum
         st = sig.signal_type.value if hasattr(sig.signal_type, "value") else str(sig.signal_type)
         weight = SIGNAL_WEIGHTS.get(st, _DEFAULT_WEIGHT)
-        raw_score = sig.score if sig.score is not None else 0.5
+        raw_score = sig.score if sig.score is not None else 0.5  # neutral risk if score missing
         total += weight * max(0.0, min(1.0, raw_score))
     return min(1.0, total)
