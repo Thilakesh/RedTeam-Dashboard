@@ -22,6 +22,7 @@ from app.models.endpoint import Endpoint
 from app.models.hvt_signal import HvtSignal
 from app.models.service import Service
 from app.models.technology import Technology
+from app.pipeline.vuln.router import stage_applies
 from app.pipeline.vuln.stage import VulnRecord, VulnStage, VulnStageContext
 
 log = logging.getLogger(__name__)
@@ -162,10 +163,10 @@ async def run_vuln_dag(
                 await on_skip(stage, "intrusive not enabled")
                 return
 
-            # Conditional gate: stages may declare applies(ctx) to self-skip.
-            applies_fn = getattr(stage, "applies", None)
-            if applies_fn is not None and not applies_fn(ctx):
-                await on_skip(stage, "no_matching_inputs")
+            # Router gate: evaluates required_signals + applies() predicate.
+            applies, reason = stage_applies(stage, ctx)
+            if not applies:
+                await on_skip(stage, reason)
                 return
 
             stage_handle = await on_start(stage)
