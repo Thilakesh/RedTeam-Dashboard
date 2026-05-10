@@ -1,52 +1,66 @@
 # Active Tasks
 
-## Completed This Session (2026-05-09) — M-Vuln-1 + M-Vuln-2
+## Completed This Session (2026-05-10) — UI Fixes + Bug Fixes
+
+### Subfinder Fix (committed `efb4f6b` on `dev_vuln_dash`)
+- [x] Rewrote `subfinder.py` to stream stdout line-by-line (mirrors amass pattern)
+- [x] Raised `asyncio.wait_for` timeout to 300s; added `-timeout 30` per-source HTTP flag
+- [x] Kill-on-timeout returns partial results (was: scan failed entirely)
+- [x] Verified: new scan `732c510d` against boman.ai completed 14 stages, found 16 subdomains
+
+### Vuln Runner Progress Fix (same commit)
+- [x] Added `total_weight()` to `vuln/coordinator.py`
+- [x] `vuln_runner.py::on_done` now tracks `nonlocal completed_weight`, computes `progress_pct`, updates `Scan.progress_pct`, publishes `progress=` in SSE events
+- [x] Fixed double `db.commit()` in `on_done`
+
+### Navigation + UX Fixes (2026-05-10, uncommitted)
+- [x] `AppShell.tsx`: Added "Vulnerability Scans" nav entry (`/vuln-scans`, ShieldAlert icon) between "Basic Recon" and "Targets"
+- [x] `AppShell.tsx`: Added breadcrumb cases for `/vuln-scans` and `/vuln-scans/*`
+- [x] `dashboard/recon-jobs/page.tsx`: Added "Run Vuln Analysis" button per completed scan row (POSTs to `/vuln-scans`, navigates to `/vuln-scans/{id}`, spinner while in-flight)
+- [x] `backend/app/api/scans.py`: Fixed `GET /scans` — now filters `Scan.kind == ScanKind.recon`; vuln_analysis scans no longer leak into recon jobs list
+
+## Previously Completed — M-Vuln-1 + M-Vuln-2 (2026-05-09)
 
 ### M-Vuln-1 — Schema + Scan-kind Plumbing
 - [x] Migrations: `0005_promote_services_tech.py`, `0006_vuln_tables.py`, `0007_scan_kind_and_parent.py`
 - [x] ORM models: `Service`, `Technology`, `Vulnerability` (+ `VulnSeverity`, `VulnStatus`), `VulnEvidence`, `VulnRunMatch`
 - [x] `Scan` extended: `kind` (recon|vuln_analysis), `parent_scan_id` (self-FK), `intrusive` bool
-- [x] `FindingSeverity` extended: CRITICAL added (autocommit_block in 0007)
+- [x] `FindingSeverity` extended: CRITICAL added
 - [x] `Stage.applies(ctx)` optional predicate; coordinator skips with reason="no_matching_inputs"
 - [x] `upsert_assets()` dual-writes Service + Technology rows
-- [x] `scan_view.build_port_rows()` + `build_technologies()` rewritten to query first-class tables (scan-scoped)
-- [x] Backfill migrations from existing JSONB attributes (LATERAL join pattern)
+- [x] `scan_view.build_port_rows()` + `build_technologies()` rewritten to query first-class tables
 
-### M-Vuln-2 — Vuln Pipeline + Worker + API + UI (4 parallel agents)
-- [x] **Pipeline**: `VulnStage` Protocol, `VulnStageContext`, `coordinator.py` (`_levels`, `load_vuln_context`, `run_vuln_dag`, `total_weight`), `profiles.py`
-- [x] **Adapters**: `cpe_matcher.py` (offline CPE→CVE, 5 bundled rules), `panel_detector.py` (async httpx, 9 sigs), `nuclei_safe.py` (STUB → real binary in M-Vuln-3)
-- [x] **Services**: `vulns.py::upsert_vulns` (ON CONFLICT + evidence append + run_match), `vuln_view.py` (overview + paginated rows)
-- [x] **API**: `vuln_scans.py` (CRUD + SSE + overview + vulnerabilities), `vulns.py` (PATCH status with target→project→org tenant scope)
-- [x] **Worker**: `vuln_runner.py` (`run_vuln_scan`, `VulnWorkerSettings` queue=vuln, 45min timeout, max_jobs=4)
-- [x] Progress tracking added: `total_weight()` + on_done updates `scan.progress_pct` per stage
-- [x] `services/queue.py::enqueue_vuln_scan` routes to "vuln" queue
-- [x] `main.py` includes vuln_scans + vulns routers
-- [x] **Infra**: `Dockerfile.vuln_worker` (nuclei v3.2.4 + nmap), `docker-compose.yml` vuln-worker service
-- [x] **Frontend**: `lib/api.ts` types, `/vuln-scans` list page, `/vuln-scans/[id]` detail (Overview + Vulnerabilities tabs, SSE, inline status), `/scans/[id]` "Run Vulnerability Analysis" CTA
-
-### Git
-- [x] M-Vuln-1 committed + pushed (`dev_vuln_dash`)
-- [x] M-Vuln-2 commit `9c07d34` pushed to `dev_vuln_dash`
-- [x] 23 files changed, 2301 insertions
+### M-Vuln-2 — Vuln Pipeline + Worker + API + UI
+- [x] Pipeline: `VulnStage` Protocol, `VulnStageContext`, `coordinator.py`, `profiles.py`
+- [x] Adapters: `cpe_matcher` (5 bundled rules), `panel_detector` (9 sigs), `nuclei_safe` (STUB)
+- [x] Services: `vulns.py::upsert_vulns`, `vuln_view.py` (overview + paginated rows)
+- [x] API: `vuln_scans.py`, `vulns.py` (PATCH status)
+- [x] Worker: `vuln_runner.py` (queue=vuln, 45min timeout, max_jobs=4)
+- [x] Infra: `Dockerfile.vuln_worker`, docker-compose.yml vuln-worker service
+- [x] Frontend: api.ts types, `/vuln-scans` list, `/vuln-scans/[id]` detail, `/scans/[id]` CTA
 
 ## Pending / Needs User Action
 
+### Uncommitted Changes (2026-05-10)
+Three files modified locally, not yet committed to `dev_vuln_dash`:
+- `frontend/components/AppShell.tsx` — nav + breadcrumbs
+- `frontend/app/dashboard/recon-jobs/page.tsx` — Run Vuln Analysis button
+- `backend/app/api/scans.py` — kind=recon filter fix
+
+Commit when ready:
+```bash
+git add frontend/components/AppShell.tsx \
+        frontend/app/dashboard/recon-jobs/page.tsx \
+        backend/app/api/scans.py
+git commit -m "fix: filter recon-only scans in list API; add vuln nav + run-vuln button in recon jobs"
+git push origin dev_vuln_dash
+```
+
 ### PR not created (gh CLI missing on host)
 - Open manually: https://github.com/Thilakesh/RedTeam-Dashboard/compare/main...dev_vuln_dash
-- Branch: `dev_vuln_dash`, base: `main`
-- Includes M-Vuln-1 + M-Vuln-2
-
-### Verification (recommended before M-Vuln-3)
-- `docker compose up --build` (build vuln-worker image)
-- `docker compose exec backend alembic current` → expect `0007`
-- Run a recon scan against verified target → completed
-- Click "Run Vulnerability Analysis" CTA → vuln scan created
-- Watch `docker compose logs vuln-worker -f` → confirm queue=vuln pickup
-- Check `/vuln-scans/{id}` → Overview tab shows severity counts, Vulnerabilities tab paginates
-- Re-run vuln scan against same parent → confirm dedup (no duplicate vuln rows; new VulnEvidence rows appended)
 
 ## Next Milestone: M-Vuln-3 — Real Nuclei + More Stages
-- Wire real `nuclei` binary into `nuclei_safe.py` (currently stub)
+- Wire real `nuclei` binary into `nuclei_safe.py` (currently stub returning [])
 - Add stages: `testssl`, `nmap_nse_vuln`, `default_creds_matcher`, `katana` (passive), `correlator`, `ai_triage`
 - Add Diff tab in UI (uses `VulnRunMatch.state`)
 - AI triage uses existing `bounded_completion` wrapper + `ai_usage` accounting

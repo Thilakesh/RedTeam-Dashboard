@@ -75,6 +75,14 @@
 - `frontend/app/vuln-scans/[id]/page.tsx` — detail view, SSE subscription on Redis channel, Overview tab (severity cards + KEV/CVE summary), Vulnerabilities tab (paginated table with severity/status filters, inline status change PATCH), Suspense wrapper for useSearchParams, ?tab= URL param
 - `frontend/app/scans/[id]/page.tsx` — "Run Vulnerability Analysis" CTA on completed recon scans (POST /vuln-scans, navigate to /vuln-scans/{id})
 
+### Post-M-Vuln-2 Bug Fixes + UX (2026-05-10, uncommitted locally)
+✅ Done, pending commit
+
+- **Subfinder fix** (`efb4f6b`): streaming stdout, 300s timeout, `-timeout 30` per-source, kill-on-timeout returns partial results — no longer fails entire scan on slow passive sources
+- **`GET /scans` kind filter**: `backend/app/api/scans.py` — added `Scan.kind == ScanKind.recon` filter; vuln_analysis scans no longer appear in recon jobs list
+- **Vuln nav entry**: `frontend/components/AppShell.tsx` — "Vulnerability Scans" sidebar item (ShieldAlert icon, `/vuln-scans`), breadcrumbs for vuln-scans routes
+- **Run Vuln Analysis in list**: `frontend/app/dashboard/recon-jobs/page.tsx` — "Run Vuln Analysis" button per completed scan row, spinner state, navigates to `/vuln-scans/{id}`
+
 ### M-Vuln-3 — Real Nuclei + More Safe Stages
 ⏳ Not started
 
@@ -92,6 +100,7 @@
 - Tenant isolation: `Scan.org_id` denormalized; vulns scoped via target→project chain
 - Tab state via `?tab=` URL param + VALID_TABS allowlist
 - Scan kind separation: vuln_analysis scans require completed parent recon scan, run on `vuln` queue, get separate frontend route `/vuln-scans/[id]`
+- `GET /scans` filters `kind=recon` only — clean separation; vuln scans only via `/vuln-scans`
 - Vuln dedup identity: `(target_id, canonical_key)` unique; `canonical_key` formula varies by source (e.g. `cve:{cve_id}:{asset_id}`)
 - VulnEvidence is append-only; VulnRunMatch tracks per-scan new/seen state for diff view
 - VulnStageContext is detached SQLAlchemy objects (column attrs loaded, no lazy relationships) — frozen view, prevents recon re-runs
@@ -104,6 +113,7 @@
 - **arq reload**: `docker compose restart worker heavy-worker vuln-worker` after Python module changes — bind mount alone does not reload
 - **Bind mount**: all worker services need `volumes: - ../backend:/app` for dev hot-swap
 - **Vuln module boundary**: vuln adapters NEVER write to `assets`/`services`/`technologies` — they consume the frozen `VulnStageContext` only
+- **Subfinder**: use streaming async for (not `proc.communicate()`), 300s wait_for, `-timeout 30` per-source; kill on timeout returns partial results
 
 ## Current Focus
-M-Vuln-1 + M-Vuln-2 done. `dev_vuln_dash` branch pushed. PR creation pending (gh CLI missing). Next: **M-Vuln-3** — wire real nuclei binary, add testssl/nmap_nse_vuln/default_creds_matcher/katana/correlator/ai_triage stages, Diff tab in UI.
+M-Vuln-1 + M-Vuln-2 done + UI/bug fixes done. 3 files uncommitted locally. Commit + push pending. Next: **M-Vuln-3** — wire real nuclei binary, add testssl/nmap_nse_vuln/default_creds_matcher/katana/correlator/ai_triage stages, Diff tab in UI.

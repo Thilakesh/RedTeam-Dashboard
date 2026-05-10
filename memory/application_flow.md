@@ -151,6 +151,18 @@ BBOTStage (optional=True, deep only, heavy queue, 30-min timeout):
   → returns AssetRecord[] (type=subdomain + ipv4)
 ```
 
+## Subfinder Streaming Pattern (fixed 2026-05-10)
+
+```
+SubfinderStage.execute(ctx):
+  → asyncio.create_subprocess_exec(binary, "-d", domain, "-silent", "-all", "-timeout", "30")
+  → _collect(): async for raw in proc.stdout → parse + filter → seen.add(host)
+  → asyncio.wait_for(_collect(), timeout=300)
+  → TimeoutError: proc.kill() → wait up to 5s → return partial results (seen set)
+  → Non-zero exit code: ignored (normal when some passive sources fail)
+```
+Key: `-timeout 30` caps per-source HTTP probes; `asyncio.wait_for(300)` caps total process. Partial results always returned.
+
 ## Read Model (denormalized views)
 
 ```
@@ -215,13 +227,18 @@ Vuln scans require parent recon `status=completed` (enforced at API). They consu
 /home → Dashboard placeholder (AppShell, empty — future widgets)
 /dashboard → layout.tsx (bare AppShell wrapper) wraps:
   /dashboard          → Add Scan form ([Add] queued, [Start Scan] immediate) + "Add Scan" title
-  /dashboard/recon-jobs → Recon Jobs table + "Recon Jobs" title + 4-column stats grid (Total/Running/Completed/Failed)
+  /dashboard/recon-jobs → Recon Jobs table + 4-column stats grid (Total/Running/Completed/Failed)
+                          Actions per row:
+                            queued: [Start] [Delete]
+                            running: [Stop]
+                            completed/failed/stopped: [View Results] [Run Vuln Analysis]  ← added 2026-05-10
 /scans/[id] → tabbed Scan Detail (recon)
   URL tab: ?tab= (VALID_TABS: overview|subdomains|ips|cdnwaf|tech|ports|risks|history)
   tabs: Overview | Subdomains | IP Summary | CDN/WAF | Technologies | Ports | Risks | History
   Overview: Top Risks card for completed deep scans only
   CTA on completed scans: "Run Vulnerability Analysis" → POST /vuln-scans → /vuln-scans/{new_id}
 /vuln-scans → vuln scan list page (4s polling on running) (M-Vuln-2)
+              accessible via sidebar nav "Vulnerability Scans" ← added 2026-05-10
 /vuln-scans/[id] → vuln scan detail (M-Vuln-2)
   URL tab: ?tab= (VALID_TABS: overview|vulnerabilities)
   tabs: Overview (severity counts + KEV/CVE summary) | Vulnerabilities (paginated table, severity/status filters, inline status PATCH)
@@ -230,10 +247,24 @@ Vuln scans require parent recon `status=completed` (enforced at API). They consu
 /targets → target management
 ```
 
+### Sidebar Nav (AppShell.tsx) — updated 2026-05-10
+
+```
+Dashboard          → /home
+Basic Recon ▼
+  Add Scan         → /dashboard
+  Recon Jobs       → /dashboard/recon-jobs
+Vulnerability Scans → /vuln-scans   ← added
+Targets            → /targets
+Reports            → /reports
+Settings           → /settings
+```
+
 ## Vuln Scan Flow (M-Vuln-2)
 
 ```
-User clicks "Run Vulnerability Analysis" on completed recon scan detail
+Entry point 1: User clicks "Run Vulnerability Analysis" on completed recon scan detail (/scans/{id})
+Entry point 2: User clicks "Run Vuln Analysis" on completed scan row in /dashboard/recon-jobs  ← added 2026-05-10
   → POST /vuln-scans { parent_scan_id, profile: "vuln_quick", intrusive: false }
   → API validates: parent recon scan exists in user's org, status=completed
   → Inserts Scan(kind=vuln_analysis, parent_scan_id, target_id, intrusive)
@@ -279,6 +310,14 @@ Status transitions (Vulnerability.status):
   * → wont_fix (manual)
 ```
 
+## Scan API Kind Separation (fixed 2026-05-10)
+
+```
+GET /scans          → kind=recon only (WHERE Scan.kind == ScanKind.recon)
+GET /vuln-scans     → kind=vuln_analysis only (WHERE Scan.kind == ScanKind.vuln_analysis)
+```
+These two lists are strictly separated. Recon jobs page only ever shows recon scans. Vuln scans page only shows vuln_analysis scans. No mixing.
+
 ## Frontend TanStack Query Keys
 
 | Key pattern | Endpoint | Invalidated on |
@@ -294,6 +333,7 @@ Status transitions (Vulnerability.status):
 | `["scan-ports", id]` | `GET /scans/{id}/ports` | all SSE events |
 | `["scan-findings", id, severity, page]` | `GET /scans/{id}/findings` | `scan.completed` only |
 | `["scan-findings", id, "HIGH", 1]` | `GET /scans/{id}/findings?severity=HIGH&limit=5` | `scan.completed` only |
+| `["vuln-scans"]` | `GET /vuln-scans` | 4s polling while running |
 
 ## Key Module Boundaries
 
@@ -312,6 +352,6 @@ Status transitions (Vulnerability.status):
 | services/scan_view.py | Read-model aggregation + build_findings() | Write to DB |
 | services/vuln_view.py | Vuln overview + paginated rows (scan-scoped) | Write to DB |
 | services/storage.py | MinIO upload + URL generation | Use minio:9000 for public URLs |
-| app/api/scans.py | Recon scan CRUD + lifecycle | Business logic beyond status transitions |
+| app/api/scans.py | Recon scan CRUD + lifecycle (kind=recon filter on list) | Business logic beyond status transitions |
 | app/api/vuln_scans.py | Vuln scan CRUD + SSE + overview/vulns | Business logic beyond status transitions |
 | app/api/vulns.py | PATCH vuln status (tenant-scoped via target→project→org) | Touch assets |

@@ -1,34 +1,31 @@
 # Next Steps
 
 ## M0–M5 + M-Vuln-1 + M-Vuln-2 — DONE (2026-05-09)
+## UI/Bug Fixes — DONE (2026-05-10)
 
-Backend + frontend complete through M-Vuln-2. Branch `dev_vuln_dash` pushed at commit `9c07d34`.
+Backend + frontend complete through M-Vuln-2. Three uncommitted local changes from 2026-05-10 session.
 
 ## Immediate Actions (User)
 
-1. **Create PR**: gh CLI not installed. Open manually:
-   https://github.com/Thilakesh/RedTeam-Dashboard/compare/main...dev_vuln_dash
-   Includes M-Vuln-1 schema + M-Vuln-2 pipeline/worker/API/UI.
-
-2. **Verify end-to-end** (recommended):
+1. **Commit + push UI fixes** (3 files modified locally):
    ```bash
-   cd infra
-   docker compose up --build      # build vuln-worker image
-   docker compose exec backend alembic current   # expect 0007
+   git add frontend/components/AppShell.tsx \
+           frontend/app/dashboard/recon-jobs/page.tsx \
+           backend/app/api/scans.py
+   git commit -m "fix: filter recon-only scans in list API; add vuln nav + run-vuln button in recon jobs"
+   git push origin dev_vuln_dash
    ```
-   Then in UI:
-   - Run a recon scan against a verified target
-   - On completed scan detail, click "Run Vulnerability Analysis"
-   - Watch `docker compose logs vuln-worker -f`
-   - Open `/vuln-scans/{id}` — Overview + Vulnerabilities tabs should populate
-   - Re-run against same parent → confirm dedup (new VulnEvidence rows; no duplicate Vulnerability rows)
+
+2. **Create PR** (gh CLI not installed):
+   https://github.com/Thilakesh/RedTeam-Dashboard/compare/main...dev_vuln_dash
+   Includes M-Vuln-1 schema + M-Vuln-2 pipeline/worker/API/UI + subfinder fix + nav/UX fixes.
 
 ## Next Milestone: M-Vuln-3 — Real Nuclei + Safe Stages
 
-Goal: replace nuclei_safe stub with real binary, add the rest of the safe-tier vuln stages, ship Diff tab.
+Goal: replace nuclei_safe stub with real binary, add safe-tier vuln stages, ship Diff tab.
 
 **Stages to add:**
-- `nuclei_safe.py`: real `nuclei` subprocess invocation; rate-limit `-rate-limit 150 -bulk-size 25`; templates dir mounted read-only from host volume (version-pinned, do NOT call `-update-templates` at scan time)
+- `nuclei_safe.py`: real `nuclei` subprocess; rate-limit `-rate-limit 150 -bulk-size 25`; templates dir mounted read-only from host volume (version-pinned, do NOT call `-update-templates` at scan time)
 - `testssl.py`: TLS misconfig (weak ciphers, expired certs, deprecated protocols)
 - `nmap_nse_vuln.py`: safe NSE category (`vuln-cve*`, `http-enum`, `ssl-cert`)
 - `default_creds_matcher.py`: matches services to known default-cred CPEs (NO auth attempts)
@@ -62,3 +59,4 @@ Goal: replace nuclei_safe stub with real binary, add the rest of the safe-tier v
 - `RLIMIT_AS` still banned for Go binaries
 - arq reload: `docker compose restart worker heavy-worker vuln-worker` after Python module changes
 - All worker services need `volumes: - ../backend:/app` bind mount for dev hot-swap
+- `GET /scans` filters `kind=recon` only — vuln_analysis scans accessed only via `GET /vuln-scans`
