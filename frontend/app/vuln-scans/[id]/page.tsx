@@ -18,6 +18,7 @@ import {
 import {
   api,
   sseUrl,
+  type VulnDiff,
   type VulnScanDetail,
   type VulnOverview,
   type VulnOut,
@@ -464,6 +465,87 @@ function VulnerabilitiesTab({ scanId }: { scanId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Diff tab
+// ---------------------------------------------------------------------------
+
+function DiffSection({ title, items, tone }: { title: string; items: VulnOut[]; tone: "new" | "seen" | "fixed" }) {
+  const toneClass =
+    tone === "new"
+      ? "border-orange-300 bg-orange-50 dark:bg-orange-950/20"
+      : tone === "fixed"
+      ? "border-green-300 bg-green-50 dark:bg-green-950/20"
+      : "border-border bg-card";
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <span className="text-xs text-muted-foreground tabular-nums">{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">None.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.slice(0, 50).map((v) => (
+            <li key={v.id} className="flex items-center gap-2 text-xs">
+              <SeverityBadge severity={v.severity} />
+              <span className="font-medium truncate" title={v.title}>{v.title}</span>
+              <span className="ml-auto font-mono text-muted-foreground truncate max-w-[200px]" title={v.asset_label}>
+                {v.asset_label}
+              </span>
+            </li>
+          ))}
+          {items.length > 50 && (
+            <li className="text-xs text-muted-foreground">…and {items.length - 50} more.</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function DiffTab({ scanId }: { scanId: string }) {
+  const q = useQuery({
+    queryKey: ["vuln-diff", scanId],
+    queryFn: () => api<VulnDiff>(`/vuln-scans/${scanId}/diff`),
+  });
+
+  if (q.isLoading) return <p className="mt-4 text-sm text-muted-foreground">Loading diff…</p>;
+  if (q.isError || !q.data) return <p className="mt-4 text-sm text-destructive">Failed to load diff.</p>;
+
+  const d = q.data;
+
+  return (
+    <div className="mt-4 space-y-4">
+      {!d.has_prior && (
+        <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          No prior completed vuln scan against this target — every detection here is necessarily new.
+          Run another vuln scan later to compare.
+        </div>
+      )}
+      <div className="flex flex-wrap gap-3">
+        <div className="rounded-md border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2">
+          <div className="text-xs uppercase tracking-wide text-orange-600 font-semibold">New</div>
+          <div className="text-xl font-bold tabular-nums">{d.counts.new}</div>
+        </div>
+        <div className="rounded-md border border-border bg-card px-3 py-2">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Seen</div>
+          <div className="text-xl font-bold tabular-nums">{d.counts.seen}</div>
+        </div>
+        <div className="rounded-md border border-green-300 bg-green-50 dark:bg-green-950/20 px-3 py-2">
+          <div className="text-xs uppercase tracking-wide text-green-600 font-semibold">Fixed in this run</div>
+          <div className="text-xl font-bold tabular-nums">{d.counts.fixed}</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <DiffSection title="New" items={d.new} tone="new" />
+        <DiffSection title="Seen" items={d.seen} tone="seen" />
+        <DiffSection title="Fixed in this run" items={d.fixed} tone="fixed" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main content (uses useSearchParams → wrapped in Suspense below)
 // ---------------------------------------------------------------------------
 
@@ -472,7 +554,7 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const VALID_TABS = ["overview", "vulnerabilities"];
+  const VALID_TABS = ["overview", "vulnerabilities", "diff"];
   const rawTab = searchParams.get("tab");
   const defaultTab = rawTab && VALID_TABS.includes(rawTab) ? rawTab : "overview";
 
@@ -491,6 +573,7 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
       qc.invalidateQueries({ queryKey: ["vuln-scan", params.id] });
       qc.invalidateQueries({ queryKey: ["vuln-overview", params.id] });
       qc.invalidateQueries({ queryKey: ["vuln-list", params.id] });
+      qc.invalidateQueries({ queryKey: ["vuln-diff", params.id] });
     };
     SSE_EVENTS.forEach((ev) => es.addEventListener(ev, refetch));
     es.onerror = () => {
@@ -594,6 +677,7 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="vulnerabilities">Vulnerabilities</TabsTrigger>
+          <TabsTrigger value="diff">Diff</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -605,6 +689,9 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
         </TabsContent>
         <TabsContent value="vulnerabilities">
           <VulnerabilitiesTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="diff">
+          <DiffTab scanId={params.id} />
         </TabsContent>
       </Tabs>
     </AppShell>

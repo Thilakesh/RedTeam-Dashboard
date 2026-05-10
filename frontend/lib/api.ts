@@ -279,3 +279,11 @@ export type VulnsPage = {
   total: number;
   items: VulnOut[];
 };
+
+export type VulnDiff = {
+  counts: { new: number; seen: number; fixed: number };
+  new: VulnOut[];
+  seen: VulnOut[];
+  fixed: VulnOut[];
+  has_prior: boolean;
+};

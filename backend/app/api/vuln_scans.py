@@ -15,12 +15,13 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import Scan, ScanKind, ScanStatus, Target
 from app.schemas.vuln import (
+    VulnDiffOut,
     VulnOverview,
+    VulnOut,
     VulnScanCreateRequest,
     VulnScanDetailOut,
     VulnScanOut,
     VulnsPage,
-    VulnOut,
 )
 from app.services import vuln_view
 from app.services.queue import enqueue_vuln_scan
@@ -249,3 +250,40 @@ async def list_vuln_scan_vulnerabilities(
         for r in rows
     ]
     return VulnsPage(total=total, items=items)
+
+
+def _vuln_row_to_out(r) -> VulnOut:
+    return VulnOut(
+        id=r.id,
+        canonical_key=r.canonical_key,
+        title=r.title,
+        severity=r.severity,
+        cvss_v3=r.cvss_v3,
+        cve_ids=r.cve_ids,
+        cwe_ids=r.cwe_ids,
+        status=r.status,
+        asset_id=r.asset_id,
+        asset_label=r.asset_label,
+        template_id=r.template_id,
+        kev=r.kev,
+        first_seen=r.first_seen,
+        last_seen=r.last_seen,
+    )
+
+
+@router.get("/{scan_id}/diff", response_model=VulnDiffOut)
+async def get_vuln_diff(
+    scan_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VulnDiffOut:
+    """Diff vs previous completed vuln scan: new / seen / fixed_in_this_run."""
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    data = await vuln_view.build_vuln_diff(db, scan_id)
+    return VulnDiffOut(
+        counts=data["counts"],
+        new=[_vuln_row_to_out(r) for r in data["new"]],
+        seen=[_vuln_row_to_out(r) for r in data["seen"]],
+        fixed=[_vuln_row_to_out(r) for r in data["fixed"]],
+        has_prior=data["has_prior"],
+    )

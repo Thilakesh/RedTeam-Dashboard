@@ -73,3 +73,11 @@ class VulnStatusUpdateRequest(BaseModel):
     status: str = Field(
         pattern="^(triaged|false_positive|fixed|wont_fix|open|reopened)$"
     )
+
+
+class VulnDiffOut(BaseModel):
+    counts: dict
+    new: list[VulnOut]
+    seen: list[VulnOut]
+    fixed: list[VulnOut]
+    has_prior: bool
