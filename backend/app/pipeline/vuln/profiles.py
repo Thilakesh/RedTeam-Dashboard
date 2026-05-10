@@ -2,10 +2,12 @@ from app.pipeline.vuln.adapters.ai_triage import AiTriageStage
 from app.pipeline.vuln.adapters.correlator import CorrelatorStage
 from app.pipeline.vuln.adapters.cpe_matcher import CpeMatcherStage
 from app.pipeline.vuln.adapters.default_creds_matcher import DefaultCredsMatcherStage
+from app.pipeline.vuln.adapters.endpoint_classifier import EndpointClassifierStage
 from app.pipeline.vuln.adapters.katana import KatanaStage
 from app.pipeline.vuln.adapters.nmap_nse_vuln import NmapNseVulnStage
 from app.pipeline.vuln.adapters.nuclei_safe import NucleiSafeStage
 from app.pipeline.vuln.adapters.panel_detector import PanelDetectorStage
+from app.pipeline.vuln.adapters.swagger_discoverer import SwaggerDiscovererStage
 from app.pipeline.vuln.adapters.testssl import TestsslStage
 
 
@@ -36,6 +38,7 @@ def _standard():
         CpeMatcherStage(),
         PanelDetectorStage(),
         DefaultCredsMatcherStage(),
+        SwaggerDiscovererStage(),
         NucleiSafeStage(),
         TestsslStage(),
         NmapNseVulnStage(),
@@ -49,10 +52,12 @@ def _deep():
         CpeMatcherStage(),
         PanelDetectorStage(),
         DefaultCredsMatcherStage(),
+        SwaggerDiscovererStage(),
+        KatanaStage(),
+        EndpointClassifierStage(),
         NucleiSafeStage(),
         TestsslStage(),
         NmapNseVulnStage(),
-        KatanaStage(),
         CorrelatorStage(),
         AiTriageStage(),
     ])

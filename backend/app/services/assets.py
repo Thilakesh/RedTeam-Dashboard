@@ -9,6 +9,7 @@ from app.models import Asset, AssetObservation
 from app.models.service import Service
 from app.models.technology import Technology
 from app.pipeline.stage import AssetRecord
+from app.services.classify_service import classify_service
 
 
 # Postgres's wire protocol caps a single statement at 32767 bind parameters. We chunk
@@ -121,6 +122,7 @@ async def _upsert_services(
             port = int(port_str)
         except (ValueError, IndexError):
             continue
+        service_name = p.get("service_name")
         rows.append(
             {
                 "target_id": target_id,
@@ -130,10 +132,11 @@ async def _upsert_services(
                 "proto": proto,
                 "canonical_key": r.canonical_key,
                 "state": p.get("state") or "open",
-                "service_name": p.get("service_name"),
+                "service_name": service_name,
                 "product": p.get("product"),
                 "version": p.get("version"),
                 "cpes": p.get("cpes") or [],
+                "classification": classify_service(port=port, service_name=service_name),
             }
         )
     if not rows:
@@ -152,6 +155,7 @@ async def _upsert_services(
                 "product": func.coalesce(stmt.excluded.product, Service.product),
                 "version": func.coalesce(stmt.excluded.version, Service.version),
                 "cpes": func.coalesce(stmt.excluded.cpes, Service.cpes),
+                "classification": stmt.excluded.classification,
             },
         )
         await db.execute(stmt)

@@ -1,15 +1,38 @@
 from __future__ import annotations
 
+import enum
 from datetime import datetime
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
+
+
+class ServiceClassification(str, enum.Enum):
+    """Coarse-grained service taxonomy used for conditional vuln-stage routing.
+
+    Computed at recon write-time from service_name + product + port heuristics
+    in `services/classify_service.py`. Vuln stages can declare e.g.
+    `required_signals=["service.classification:database"]` to fire only on DBs.
+    """
+    web = "web"
+    database = "database"
+    messaging = "messaging"
+    control_plane = "control_plane"
+    file_share = "file_share"
+    mail = "mail"
+    directory = "directory"
+    crypto = "crypto"
+    rpc = "rpc"
+    monitoring = "monitoring"
+    iot = "iot"
+    cache = "cache"
+    unknown = "unknown"
 
 
 class Service(Base):
@@ -45,6 +68,11 @@ class Service(Base):
         ARRAY(sa.Text), nullable=False, server_default="{}"
     )
     tls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    classification: Mapped[ServiceClassification] = mapped_column(
+        Enum(ServiceClassification, name="service_classification", create_type=False),
+        nullable=False,
+        server_default="unknown",
+    )
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

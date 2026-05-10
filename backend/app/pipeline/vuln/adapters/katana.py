@@ -1,11 +1,13 @@
 """katana — passive endpoint discovery.
 
-Runs `katana -passive -silent -jc -d 2` against http_service URLs. Passive
-mode pulls endpoints from public sources (web archives, common-crawl) and
-makes NO active requests against the target. The discovered endpoints are
-written into a single INFO-severity VulnRecord per asset whose evidence
-carries the endpoint list — surfacing them in the Endpoints tab without
-polluting the vulnerability count.
+Runs `katana -passive -silent -jc -d 2` against http_service URLs. Passive mode
+pulls endpoints from public sources (web archives, common-crawl) and makes NO
+active requests against the target.
+
+M-Vuln-5: writes to the first-class `endpoints` table via
+`services/endpoints.py::upsert_endpoints`. Returns NO VulnRecords — endpoint
+discovery is surface enrichment, not a weakness signal. Downstream stages
+(nuclei_safe, ffuf, endpoint_classifier) consume the table.
 
 Fail-soft: optional=True; returns [] if the binary is missing or times out.
 """
@@ -16,7 +18,9 @@ import asyncio
 import logging
 import shutil
 
-from app.pipeline.vuln.stage import VulnEvidenceRecord, VulnRecord, VulnStageContext
+from app.core.db import SessionLocal
+from app.pipeline.vuln.stage import VulnRecord, VulnStageContext
+from app.services.endpoints import EndpointRecord, upsert_endpoints
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +85,7 @@ class KatanaStage:
         except FileNotFoundError:
             return []
 
-        # Group endpoints by their root http_service
+        # Group discovered endpoints by their root http_service asset.
         endpoints_by_asset: dict = {}
         for raw in stdout.splitlines():
             line = raw.decode(errors="ignore").strip()
@@ -89,29 +93,68 @@ class KatanaStage:
                 continue
             for url, asset in url_to_asset.items():
                 if line.startswith(url):
-                    bucket = endpoints_by_asset.setdefault(asset.id, [])
-                    if len(bucket) < _MAX_ENDPOINTS_PER_ASSET and line not in bucket:
-                        bucket.append(line)
+                    bucket = endpoints_by_asset.setdefault(asset.id, set())
+                    if len(bucket) < _MAX_ENDPOINTS_PER_ASSET:
+                        bucket.add(line)
                     break
 
-        records: list[VulnRecord] = []
-        for asset_id, eps in endpoints_by_asset.items():
-            if not eps:
-                continue
-            asset = next(a for a in ctx.http_services if a.id == asset_id)
-            records.append(
-                VulnRecord(
-                    asset_id=asset_id,
-                    canonical_key=f"endpoints:{asset_id}",
-                    title=f"Discovered endpoints ({len(eps)}) on {asset.canonical_key}",
-                    severity="INFO",
-                    description=f"katana passive crawl found {len(eps)} URLs.",
-                    evidence=VulnEvidenceRecord(
-                        source_tool="katana",
-                        matcher_name="passive_crawl",
-                        extracted={"endpoints": eps, "count": len(eps)},
-                        confidence=90,
-                    ),
-                )
-            )
-        return records
+        # Build EndpointRecord list for upsert.
+        records: list[EndpointRecord] = []
+        for asset_id, ep_set in endpoints_by_asset.items():
+            for url in ep_set:
+                records.append(EndpointRecord(asset_id=asset_id, url=url, method="GET"))
+
+        if not records:
+            return []
+
+        # Write to endpoints table directly. Use a fresh session — the stage runs
+        # outside the worker's primary session per the M-Vuln-2 detached-context pattern.
+        # Stage_id is not yet known here; pass the scan_id as a sentinel since the
+        # observation table requires a stage_id. We retrieve the current ScanStage
+        # row id from ctx in the worker's on_done flow — but for this adapter the
+        # cleanest approach is to skip observations for now (endpoints alone are
+        # the signal). See M-Vuln-6 for adding katana stage_id plumbing.
+        # MVP: write endpoints, no observations.
+        async with SessionLocal() as db:
+            await _upsert_no_obs(db, target_id=ctx.target_id, records=records)
+            await db.commit()
+
+        log.info("katana: wrote %d endpoints across %d assets",
+                 len(records), len(endpoints_by_asset))
+        return []
+
+
+async def _upsert_no_obs(db, *, target_id, records):
+    """Endpoint upsert WITHOUT writing observations.
+
+    The full upsert_endpoints() helper writes per-scan observations, which need a
+    stage_id. The katana adapter here doesn't have access to its own stage_id
+    inside execute_vuln (the coordinator allocates it but doesn't pass it). Until
+    we plumb stage_id through (M-Vuln-6), endpoints are first-class but their
+    per-scan history is reconstructed from vulnerability scans against them.
+    """
+    from sqlalchemy.dialects.postgresql import insert
+    from sqlalchemy.sql import func
+    from urllib.parse import urlparse
+    from app.models.endpoint import Endpoint
+
+    for start in range(0, len(records), 2000):
+        chunk = records[start : start + 2000]
+        rows = [
+            {
+                "target_id": target_id,
+                "asset_id": r.asset_id,
+                "service_id": r.service_id,
+                "url": r.url,
+                "path": urlparse(r.url).path or "/",
+                "method": r.method,
+                "source_tool": "katana",
+            }
+            for r in chunk
+        ]
+        stmt = insert(Endpoint).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_endpoint_identity",
+            set_={"last_seen": func.now()},
+        )
+        await db.execute(stmt)

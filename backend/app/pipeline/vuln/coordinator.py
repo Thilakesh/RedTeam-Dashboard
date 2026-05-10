@@ -18,6 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
+from app.models.endpoint import Endpoint
+from app.models.hvt_signal import HvtSignal
 from app.models.service import Service
 from app.models.technology import Technology
 from app.pipeline.vuln.stage import VulnRecord, VulnStage, VulnStageContext
@@ -95,6 +97,29 @@ async def load_vuln_context(
 
     http_service_urls = [asset.canonical_key for asset in http_services]
 
+    # M-Vuln-5: pre-load endpoints + HVT signals discovered in prior scans against
+    # this target. Stages can self-skip via applies(ctx) when their preconditions
+    # are absent ("no_matching_signals" reason). Endpoints from the *current* scan
+    # are written in real-time but won't appear in this snapshot — that's correct,
+    # the snapshot is what existed BEFORE this run.
+    endpoints_result = await db.scalars(
+        select(Endpoint).where(Endpoint.target_id == target_id)
+    )
+    endpoints = list(endpoints_result.all())
+
+    hvt_result = await db.scalars(
+        select(HvtSignal).where(HvtSignal.target_id == target_id)
+    )
+    hvt_signals = list(hvt_result.all())
+
+    endpoints_by_asset: dict = {}
+    for ep in endpoints:
+        endpoints_by_asset.setdefault(ep.asset_id, []).append(ep)
+
+    hvt_signals_by_asset: dict = {}
+    for sig in hvt_signals:
+        hvt_signals_by_asset.setdefault(sig.asset_id, []).append(sig)
+
     return VulnStageContext(
         scan_id=scan_id,
         target_id=target_id,
@@ -107,6 +132,10 @@ async def load_vuln_context(
         service_by_id=service_by_id,
         tech_by_asset_id=tech_by_asset_id,
         http_service_urls=http_service_urls,
+        endpoints=endpoints,
+        hvt_signals=hvt_signals,
+        endpoints_by_asset=endpoints_by_asset,
+        hvt_signals_by_asset=hvt_signals_by_asset,
     )
 
 

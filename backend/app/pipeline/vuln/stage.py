@@ -47,6 +47,22 @@ class VulnStageContext:
     service_by_id: dict   # UUID -> Service
     tech_by_asset_id: dict  # UUID -> list[Technology]
     http_service_urls: list[str]  # canonical_key (URLs) from http_services
+    # M-Vuln-5: pre-loaded endpoint + HVT views from prior vuln scans
+    endpoints: list = None              # list[Endpoint]
+    hvt_signals: list = None            # list[HvtSignal]
+    endpoints_by_asset: dict = None     # UUID -> list[Endpoint]
+    hvt_signals_by_asset: dict = None   # UUID -> list[HvtSignal]
+
+    def __post_init__(self) -> None:
+        # Normalize None → empty so adapters can iterate without guards.
+        if self.endpoints is None:
+            self.endpoints = []
+        if self.hvt_signals is None:
+            self.hvt_signals = []
+        if self.endpoints_by_asset is None:
+            self.endpoints_by_asset = {}
+        if self.hvt_signals_by_asset is None:
+            self.hvt_signals_by_asset = {}
 
 
 class VulnStage(Protocol):
