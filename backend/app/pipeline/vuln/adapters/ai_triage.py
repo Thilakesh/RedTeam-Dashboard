@@ -16,7 +16,7 @@ import json
 import logging
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 
 from app.agents.bounded_completion import bounded_completion
 from app.core.db import SessionLocal
@@ -55,8 +55,9 @@ class AiTriageStage:
                 .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
                 .where(
                     VulnRunMatch.scan_id == ctx.scan_id,
-                    VulnRunMatch.state == "new",
+                    VulnRunMatch.state.in_(["new", "seen"]),
                 )
+                .order_by(desc(Vulnerability.risk_score).nullslast())
                 .limit(_MAX_VULNS)
             )).scalars().all()
 
@@ -71,6 +72,8 @@ class AiTriageStage:
                     "description": v.description[:600],
                     "cve_ids": list(v.cve_ids or []),
                     "template_id": v.template_id,
+                    "cvss_v3": v.cvss_v3,
+                    "risk_score": round(v.risk_score, 3) if v.risk_score is not None else None,
                 }
                 for v in rows
             ]
