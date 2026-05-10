@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import CurrentUser, get_current_user, get_current_user_sse
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.models import Asset, AssetObservation, Project, Scan, ScanStatus, Target
+from app.models import Asset, AssetObservation, Project, Scan, ScanKind, ScanStatus, Target
 from app.schemas.findings import FindingsPage
 from app.schemas.scan import AssetOut, ScanCreateRequest, ScanDetailOut, ScanOut, ScanUpdateRequest
 from app.schemas.subdomain_view import (
@@ -109,7 +109,7 @@ async def list_scans(
         await db.execute(
             select(Scan, Target.domain, Target.authorization_verified_at)
             .join(Target, Target.id == Scan.target_id)
-            .where(Scan.org_id == user.org_id)
+            .where(Scan.org_id == user.org_id, Scan.kind == ScanKind.recon)
             .order_by(desc(Scan.created_at))
             .limit(100)
         )
