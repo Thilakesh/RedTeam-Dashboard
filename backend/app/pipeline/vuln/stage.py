@@ -72,7 +72,7 @@ class VulnStage(Protocol):
     weight: int
     optional: bool
     intrusive_required: bool  # if True, skip when ctx.intrusive=False
-    required_signals: list[str]
+    required_signals: list[str] = []  # declarative signal predicates; default empty = always run
 
     async def execute_vuln(self, ctx: VulnStageContext) -> list[VulnRecord]: ...
     # Optional: def applies(self, ctx: VulnStageContext) -> bool: ...

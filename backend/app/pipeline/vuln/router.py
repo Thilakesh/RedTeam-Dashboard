@@ -33,7 +33,8 @@ def _eval_technology(ctx: VulnStageContext, name: str, version_op: str | None, v
                 return Version(tech.version) >= Version(version_val)
             except Exception:
                 return False
-        return True
+        log.warning("router: unsupported version operator %r in token — skipping", version_op)
+        return False
     return False
 
 
@@ -43,7 +44,7 @@ def _eval_hvt_signal(ctx: VulnStageContext, signal_type: str, score_op: str | No
             continue
         if score_op is None:
             return True
-        if score_op == ">=" and sig.score >= score_val:
+        if score_op == ">=" and sig.score is not None and sig.score >= score_val:
             return True
     return False
 
@@ -84,6 +85,7 @@ def _eval_endpoint_path_regex(ctx: VulnStageContext, pattern: str) -> bool:
 
 def _eval_token(token: str, ctx: VulnStageContext) -> bool:
     """Evaluate a single required_signals token. Returns True if satisfied."""
+    token = token.strip()
 
     # technology:{name}  or  technology:{name}:version>={ver}
     if token.startswith("technology:"):
