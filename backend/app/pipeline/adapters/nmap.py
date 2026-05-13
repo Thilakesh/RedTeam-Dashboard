@@ -80,6 +80,13 @@ class NmapStage:
                     except asyncio.TimeoutError:
                         pass
                     continue
+                except asyncio.CancelledError:
+                    proc.kill()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=5)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        pass
+                    raise
 
                 if not out_path.exists() or out_path.stat().st_size == 0:
                     continue

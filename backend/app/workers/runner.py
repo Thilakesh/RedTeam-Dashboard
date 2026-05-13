@@ -153,7 +153,7 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
         if final is None or final.status != ScanStatus.stopped:
             await _publish(redis, scan_id, "scan.completed")
         # If stopped, the stop_scan API endpoint already published scan.stopped
-    except Exception as exc:
+    except BaseException as exc:
         fresh_scan = None
         async with SessionLocal() as db:
             fresh_scan = await db.get(Scan, scan_id)
