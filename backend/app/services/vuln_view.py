@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Scan, ScanKind, ScanStatus
 from app.models.asset import Asset
+from app.models.endpoint import Endpoint
 from app.models.service import Service
 from app.models.technology import Technology
+from app.models.tls_observation import TlsObservation
 from app.models.vulnerability import Vulnerability, VulnSeverity
 from app.models.vuln_run_match import VulnRunMatch
 from sqlalchemy import desc
@@ -308,3 +310,99 @@ async def build_by_technology(db: AsyncSession, scan_id: UUID) -> list[dict]:
         key=lambda x: (x["max_risk_score"] or 0, x["vuln_count"]),
         reverse=True,
     )
+
+
+async def build_endpoint_rows(
+    db: AsyncSession,
+    scan_id: UUID,
+    *,
+    is_login: bool | None = None,
+    is_admin: bool | None = None,
+    is_api: bool | None = None,
+    offset: int = 0,
+    limit: int = 50,
+) -> tuple[int, list]:
+    """Paginated endpoints for the target of this vuln scan."""
+    target_id = await db.scalar(select(Scan.target_id).where(Scan.id == scan_id))
+    if target_id is None:
+        return 0, []
+
+    base_q = select(Endpoint).where(Endpoint.target_id == target_id)
+
+    if is_login is not None:
+        base_q = base_q.where(Endpoint.is_login == is_login)
+    if is_admin is not None:
+        base_q = base_q.where(Endpoint.is_admin == is_admin)
+    if is_api is not None:
+        base_q = base_q.where(Endpoint.is_api == is_api)
+
+    count_q = select(func.count()).select_from(base_q.subquery())
+    total: int = (await db.scalar(count_q)) or 0
+
+    page_q = base_q.order_by(Endpoint.last_seen.desc()).offset(offset).limit(limit)
+    result = (await db.execute(page_q)).scalars().all()
+    return total, list(result)
+
+
+async def build_tls_view(db: AsyncSession, scan_id: UUID) -> list[dict]:
+    """Most recent TLS observation per service for the target of this scan."""
+    target_id = await db.scalar(select(Scan.target_id).where(Scan.id == scan_id))
+    if target_id is None:
+        return []
+
+    # Distinct on service_id: get the most recent observation per service
+    latest_subq = (
+        select(
+            TlsObservation.service_id,
+            func.max(TlsObservation.observed_at).label("max_obs"),
+        )
+        .where(TlsObservation.target_id == target_id)
+        .group_by(TlsObservation.service_id)
+        .subquery()
+    )
+
+    rows = (
+        await db.execute(
+            select(TlsObservation, Service.canonical_key.label("service_key"))
+            .join(
+                latest_subq,
+                (TlsObservation.service_id == latest_subq.c.service_id)
+                & (TlsObservation.observed_at == latest_subq.c.max_obs),
+            )
+            .join(Service, Service.id == TlsObservation.service_id)
+            .order_by(TlsObservation.cert_not_after.asc().nullslast())
+        )
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    result = []
+    for tls, service_key in rows:
+        days = None
+        is_expired = False
+        if tls.cert_not_after:
+            delta = tls.cert_not_after.replace(tzinfo=timezone.utc) - now
+            days = delta.days
+            is_expired = days < 0
+
+        # Deprecated protocols: those enabled that are TLSv1.0 or TLSv1.1
+        deprecated = [
+            proto
+            for proto, enabled in (tls.protocols or {}).items()
+            if enabled and proto in ("TLSv1.0", "TLSv1.1")
+        ]
+
+        result.append({
+            "service_id": tls.service_id,
+            "service_key": service_key,
+            "cert_subject": tls.cert_subject,
+            "cert_issuer": tls.cert_issuer,
+            "cert_not_after": tls.cert_not_after,
+            "days_until_expiry": days,
+            "is_expired": is_expired,
+            "grade": tls.grade,
+            "weak_ciphers": tls.weak_ciphers or [],
+            "deprecated_protocols": deprecated,
+            "observed_at": tls.observed_at,
+        })
+
+    return result
