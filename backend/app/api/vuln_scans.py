@@ -388,9 +388,8 @@ async def get_endpoint_detail(
     db: AsyncSession = Depends(get_db),
 ) -> EndpointDetail:
     scan, _ = await _get_vuln_scan(db, scan_id, user.org_id)
-    from sqlalchemy import select as _select
     ep = await db.scalar(
-        _select(Endpoint).where(
+        select(Endpoint).where(
             Endpoint.id == endpoint_id,
             Endpoint.target_id == scan.target_id,
         )
