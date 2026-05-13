@@ -151,6 +151,18 @@ BBOTStage (optional=True, deep only, heavy queue, 30-min timeout):
   → returns AssetRecord[] (type=subdomain + ipv4)
 ```
 
+## Subfinder Streaming Pattern (fixed 2026-05-10)
+
+```
+SubfinderStage.execute(ctx):
+  → asyncio.create_subprocess_exec(binary, "-d", domain, "-silent", "-all", "-timeout", "30")
+  → _collect(): async for raw in proc.stdout → parse + filter → seen.add(host)
+  → asyncio.wait_for(_collect(), timeout=300)
+  → TimeoutError: proc.kill() → wait up to 5s → return partial results (seen set)
+  → Non-zero exit code: ignored (normal when some passive sources fail)
+```
+Key: `-timeout 30` caps per-source HTTP probes; `asyncio.wait_for(300)` caps total process. Partial results always returned.
+
 ## Read Model (denormalized views)
 
 ```
@@ -179,11 +191,23 @@ SubdomainRow.sources: `list[str]` — sorted list of source_tool values from ass
 
 ## Profiles
 
+### Recon profiles (`Scan.kind = recon`)
+
 | Profile  | Stages                                                                                             | authz needed | Queue   |
 |----------|----------------------------------------------------------------------------------------------------|-------------|---------|
 | quick    | subfinder                                                                                          | No          | default |
 | standard | subfinder, assetfinder, amass, dnsx, httpx, asnmap, geoip, wafw00f                               | No          | default |
 | deep     | authz_verifier (L0) + standard + bbot + naabu, nmap, gowitness, risk_prioritizer                  | Yes (active)| heavy   |
+
+### Vuln profiles (`Scan.kind = vuln_analysis`, M-Vuln-2)
+
+| Profile        | Stages                                              | Intrusive | Queue |
+|----------------|-----------------------------------------------------|-----------|-------|
+| vuln_quick     | cpe_matcher, panel_detector, nuclei_safe (stub)     | No        | vuln  |
+| vuln_standard  | (same as quick currently, expanded in M-Vuln-3)     | No        | vuln  |
+| vuln_deep      | (same as quick currently, expanded in M-Vuln-3/4)   | Optional  | vuln  |
+
+Vuln scans require parent recon `status=completed` (enforced at API). They consume frozen `VulnStageContext` (services + technologies + http_services from parent recon target) — adapters never re-run recon tools.
 
 **naabu must always use `-s c` (connect scan)**: default SYN scan is silently blocked by Cloudflare and returns 0–4 ports. Connect scan finds all open ports.
 
@@ -203,13 +227,96 @@ SubdomainRow.sources: `list[str]` — sorted list of source_tool values from ass
 /home → Dashboard placeholder (AppShell, empty — future widgets)
 /dashboard → layout.tsx (bare AppShell wrapper) wraps:
   /dashboard          → Add Scan form ([Add] queued, [Start Scan] immediate) + "Add Scan" title
-  /dashboard/recon-jobs → Recon Jobs table + "Recon Jobs" title + 4-column stats grid (Total/Running/Completed/Failed)
-/scans/[id] → tabbed Scan Detail
-  URL tab selection: ?tab=<value> (VALID_TABS: overview|subdomains|ips|cdnwaf|tech|ports|risks|history)
-  tabs: Overview | Subdomains | IP Summary | CDN/WAF | Technologies | Ports | Risks | History (stub)
-  Overview tab: Top Risks card for completed deep scans only
+  /dashboard/recon-jobs → Recon Jobs table + 4-column stats grid (Total/Running/Completed/Failed)
+                          Actions per row:
+                            queued: [Start] [Delete]
+                            running: [Stop]
+                            completed/failed/stopped: [View Results] [Run Vuln Analysis]  ← added 2026-05-10
+/scans/[id] → tabbed Scan Detail (recon)
+  URL tab: ?tab= (VALID_TABS: overview|subdomains|ips|cdnwaf|tech|ports|risks|history)
+  tabs: Overview | Subdomains | IP Summary | CDN/WAF | Technologies | Ports | Risks | History
+  Overview: Top Risks card for completed deep scans only
+  CTA on completed scans: "Run Vulnerability Analysis" → POST /vuln-scans → /vuln-scans/{new_id}
+/vuln-scans → vuln scan list page (4s polling on running) (M-Vuln-2)
+              accessible via sidebar nav "Vulnerability Scans" ← added 2026-05-10
+/vuln-scans/[id] → vuln scan detail (M-Vuln-2)
+  URL tab: ?tab= (VALID_TABS: overview|vulnerabilities)
+  tabs: Overview (severity counts + KEV/CVE summary) | Vulnerabilities (paginated table, severity/status filters, inline status PATCH)
+  SSE subscription on Redis channel scan:{id} while running
+  Diff tab planned for M-Vuln-3 (uses VulnRunMatch.state)
 /targets → target management
 ```
+
+### Sidebar Nav (AppShell.tsx) — updated 2026-05-10
+
+```
+Dashboard          → /home
+Basic Recon ▼
+  Add Scan         → /dashboard
+  Recon Jobs       → /dashboard/recon-jobs
+Vulnerability Scans → /vuln-scans   ← added
+Targets            → /targets
+Reports            → /reports
+Settings           → /settings
+```
+
+## Vuln Scan Flow (M-Vuln-2)
+
+```
+Entry point 1: User clicks "Run Vulnerability Analysis" on completed recon scan detail (/scans/{id})
+Entry point 2: User clicks "Run Vuln Analysis" on completed scan row in /dashboard/recon-jobs  ← added 2026-05-10
+  → POST /vuln-scans { parent_scan_id, profile: "vuln_quick", intrusive: false }
+  → API validates: parent recon scan exists in user's org, status=completed
+  → Inserts Scan(kind=vuln_analysis, parent_scan_id, target_id, intrusive)
+  → enqueue_vuln_scan(scan_id) → Arq queue "vuln"
+  → Frontend navigates to /vuln-scans/{new_id}
+
+vuln-worker picks up job (workers/vuln_runner.py::run_vuln_scan):
+  Session 1 (read):
+    → load Scan, validate kind=vuln_analysis + parent_scan_id present
+    → load parent Scan + Target
+    → Mark scan.status=running, started_at=now
+    → load_vuln_context(): query Service, Technology, Asset(type=http_service) → VulnStageContext
+    → commit + close session
+  → run_vuln_dag(stages, ctx):
+    → for each level (topo sort by depends_on):
+      → for each stage in parallel:
+        → if intrusive_required and not ctx.intrusive: on_skip(reason="intrusive not enabled")
+        → if applies(ctx) and predicate is False: on_skip(reason="no_matching_inputs")
+        → on_start() → records = stage.execute_vuln(ctx) → on_done(records)
+        → on_done: upsert_vulns + update scan.progress_pct (weight-based)
+        → if optional and raises: on_fail + log + continue; else re-raise
+  → On terminal: scan.status=completed, finished_at, progress_pct=100
+  → Redis publishes: scan.started, stage.started/completed/failed/skipped, scan.completed/failed
+```
+
+## Vuln Dedup + Lifecycle
+
+```
+upsert_vulns() (services/vulns.py):
+  → For each VulnRecord:
+    → INSERT INTO vulnerabilities ... ON CONFLICT (target_id, canonical_key) DO UPDATE
+       SET last_seen=NOW(), last_verified_at=NOW(), <merge_fields>
+    → INSERT INTO vuln_evidence (vulnerability_id, scan_id, stage_id, source_tool, ...)
+    → Determine VulnRunMatch state:
+      → if vuln existed in any prior scan → state="seen"
+      → else → state="new"
+    → INSERT INTO vuln_run_matches (scan_id, vulnerability_id, state) ON CONFLICT DO UPDATE
+
+Status transitions (Vulnerability.status):
+  open → triaged | false_positive (manual via PATCH /vulns/{id})
+  open → fixed (auto by correlator stage in M-Vuln-3 when prior scan had vuln, current does not)
+  fixed → reopened (auto when re-detected after fixed)
+  * → wont_fix (manual)
+```
+
+## Scan API Kind Separation (fixed 2026-05-10)
+
+```
+GET /scans          → kind=recon only (WHERE Scan.kind == ScanKind.recon)
+GET /vuln-scans     → kind=vuln_analysis only (WHERE Scan.kind == ScanKind.vuln_analysis)
+```
+These two lists are strictly separated. Recon jobs page only ever shows recon scans. Vuln scans page only shows vuln_analysis scans. No mixing.
 
 ## Frontend TanStack Query Keys
 
@@ -226,17 +333,25 @@ SubdomainRow.sources: `list[str]` — sorted list of source_tool values from ass
 | `["scan-ports", id]` | `GET /scans/{id}/ports` | all SSE events |
 | `["scan-findings", id, severity, page]` | `GET /scans/{id}/findings` | `scan.completed` only |
 | `["scan-findings", id, "HIGH", 1]` | `GET /scans/{id}/findings?severity=HIGH&limit=5` | `scan.completed` only |
+| `["vuln-scans"]` | `GET /vuln-scans` | 4s polling while running |
 
 ## Key Module Boundaries
 
 | Module | Responsibility | Must NOT |
 |--------|----------------|----------|
 | pipeline/adapters/* | Invoke tool, parse output, return AssetRecord[] | Touch DB |
+| pipeline/vuln/adapters/* | Consume frozen VulnStageContext, return VulnRecord[] | Touch assets/services/technologies; rerun recon tools |
 | agents/risk_prioritizer.py | Read asset graph, call LLM, write findings | Return AssetRecord[] |
 | agents/bounded_completion.py | HTTP call to OpenRouter, parse JSON | Know about DB or stage context |
-| services/assets.py | Upsert Asset + AssetObservation (flush only — caller commits) | Run subprocesses |
-| workers/runner.py | Lifecycle, pub/sub, progress | Business logic |
-| pipeline/coordinator.py | DAG scheduling, parallel execution | Know about Redis |
+| services/assets.py | Upsert Asset + AssetObservation; dual-write Service + Technology (flush only) | Run subprocesses |
+| services/vulns.py | Upsert Vulnerability + VulnEvidence + VulnRunMatch (flush only) | Touch assets/services/technologies |
+| workers/runner.py | Recon scan lifecycle, pub/sub, progress | Business logic |
+| workers/vuln_runner.py | Vuln scan lifecycle, pub/sub, progress | Re-run recon stages |
+| pipeline/coordinator.py | Recon DAG scheduling | Know about Redis |
+| pipeline/vuln/coordinator.py | Vuln DAG scheduling, intrusive + applies gates, total_weight | Know about Redis |
 | services/scan_view.py | Read-model aggregation + build_findings() | Write to DB |
+| services/vuln_view.py | Vuln overview + paginated rows (scan-scoped) | Write to DB |
 | services/storage.py | MinIO upload + URL generation | Use minio:9000 for public URLs |
-| app/api/scans.py | Scan CRUD + lifecycle endpoints | Business logic beyond status transitions |
+| app/api/scans.py | Recon scan CRUD + lifecycle (kind=recon filter on list) | Business logic beyond status transitions |
+| app/api/vuln_scans.py | Vuln scan CRUD + SSE + overview/vulns | Business logic beyond status transitions |
+| app/api/vulns.py | PATCH vuln status (tenant-scoped via target→project→org) | Touch assets |

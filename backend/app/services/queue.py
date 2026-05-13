@@ -15,3 +15,11 @@ async def enqueue_scan(scan_id: str, profile: str = "quick") -> None:
         await pool.enqueue_job("run_scan", scan_id, _queue_name=queue_name)
     finally:
         await pool.close()
+
+
+async def enqueue_vuln_scan(scan_id: str) -> None:
+    pool = await create_pool(_redis_settings())
+    try:
+        await pool.enqueue_job("run_vuln_scan", scan_id, _queue_name="vuln")
+    finally:
+        await pool.close()

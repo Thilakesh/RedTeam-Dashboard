@@ -14,6 +14,7 @@ import {
   Radar,
   ScanSearch,
   Settings,
+  ShieldAlert,
   Sun,
   Target,
 } from "lucide-react";
@@ -46,6 +47,7 @@ const NAV: NavItem[] = [
       { href: "/dashboard/recon-jobs", label: "Recon Jobs" },
     ],
   },
+  { href: "/vuln-scans", label: "Vulnerability Scans", icon: ShieldAlert },
   { href: "/targets", label: "Targets", icon: Target },
   { href: "/reports", label: "Reports", icon: FileBarChart2 },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -56,6 +58,12 @@ function buildBreadcrumb(pathname: string): string[] {
   if (pathname === "/dashboard") return ["Basic Recon", "Add Scan"];
   if (pathname === "/dashboard/recon-jobs") return ["Basic Recon", "Recon Jobs"];
   if (pathname.startsWith("/scans/")) return ["Scan Detail"];
+  if (pathname === "/vuln-scans") return ["Vulnerability Scans"];
+  if (pathname.startsWith("/vuln-scans/") && pathname.includes("/endpoints/")) {
+    return ["Vulnerability Scans", "Detail", "Endpoint"];
+  }
+  if (pathname.startsWith("/vuln-scans/")) return ["Vulnerability Scans", "Detail"];
+  if (pathname.match(/^\/targets\/[^/]+\/risk$/)) return ["Targets", "Risk View"];
   if (pathname === "/targets") return ["Targets"];
   if (pathname === "/reports") return ["Reports"];
   if (pathname === "/settings") return ["Settings"];

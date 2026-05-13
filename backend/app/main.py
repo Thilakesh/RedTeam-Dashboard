@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, scans, targets
+from app.api import auth, scans, targets, vuln_scans, vulns
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -20,6 +20,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(scans.router)
 app.include_router(targets.router)
+app.include_router(vuln_scans.router)
+app.include_router(vulns.router)
 
 
 @app.get("/health")

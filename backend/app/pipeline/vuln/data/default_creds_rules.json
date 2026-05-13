@@ -1,0 +1,74 @@
+[
+  {
+    "match_type": "service",
+    "match_field": "product",
+    "match_contains": "tomcat",
+    "title": "Apache Tomcat — known default credentials",
+    "description": "Apache Tomcat ships with default accounts (e.g. tomcat/tomcat, admin/admin) on /manager/html. Verify they are removed or rotated.",
+    "severity": "HIGH",
+    "remediation": "Remove or rename the default tomcat-users.xml accounts and restrict /manager/html to trusted networks."
+  },
+  {
+    "match_type": "tech",
+    "match_field": "name",
+    "match_contains": "jenkins",
+    "title": "Jenkins — known default credentials",
+    "description": "Older Jenkins installs allow admin/admin or anonymous setup. Confirm initial setup wizard has been completed and unauthenticated access is disabled.",
+    "severity": "HIGH",
+    "remediation": "Disable anonymous read, rotate the admin password, and enable matrix-based auth."
+  },
+  {
+    "match_type": "tech",
+    "match_field": "name",
+    "match_contains": "grafana",
+    "title": "Grafana — default admin/admin credentials",
+    "description": "Grafana ships with admin/admin. Forced password change is opt-in and frequently skipped.",
+    "severity": "HIGH",
+    "remediation": "Rotate the admin password and force_change_password=true in grafana.ini."
+  },
+  {
+    "match_type": "tech",
+    "match_field": "name",
+    "match_contains": "phpmyadmin",
+    "title": "phpMyAdmin — common default DB credentials",
+    "description": "phpMyAdmin frequently exposes a login page where the underlying MySQL still uses root with no password.",
+    "severity": "HIGH",
+    "remediation": "Restrict phpMyAdmin to localhost or VPN; ensure DB users have strong passwords."
+  },
+  {
+    "match_type": "service",
+    "match_field": "product",
+    "match_contains": "mongodb",
+    "title": "MongoDB — auth disabled by default",
+    "description": "MongoDB historically launches with --noauth. Open 27017 with no auth implies unauthenticated read/write.",
+    "severity": "CRITICAL",
+    "remediation": "Enable authentication (security.authorization=enabled) and bind to private interfaces only."
+  },
+  {
+    "match_type": "service",
+    "match_field": "product",
+    "match_contains": "redis",
+    "title": "Redis — no default password",
+    "description": "Redis runs without authentication unless requirepass is set. Exposed 6379 implies unauthenticated access.",
+    "severity": "CRITICAL",
+    "remediation": "Set requirepass, bind to localhost, or restrict via firewall."
+  },
+  {
+    "match_type": "tech",
+    "match_field": "name",
+    "match_contains": "kibana",
+    "title": "Kibana — anonymous access likely",
+    "description": "Kibana frequently runs with no authentication when the X-Pack security plugin is disabled.",
+    "severity": "HIGH",
+    "remediation": "Enable X-Pack security and require login on Kibana endpoints."
+  },
+  {
+    "match_type": "service",
+    "match_field": "product",
+    "match_contains": "elasticsearch",
+    "title": "Elasticsearch — no auth by default",
+    "description": "Elasticsearch versions before 8.0 do not enable security by default. Exposed 9200 implies unauthenticated cluster access.",
+    "severity": "CRITICAL",
+    "remediation": "Upgrade to 8.x with built-in security, or enable X-Pack security and TLS."
+  }
+]

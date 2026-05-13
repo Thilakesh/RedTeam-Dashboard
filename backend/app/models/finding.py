@@ -13,6 +13,7 @@ from app.core.db import Base
 
 
 class FindingSeverity(str, enum.Enum):
+    CRITICAL = "CRITICAL"
     HIGH = "HIGH"
     MED = "MED"
     LOW = "LOW"
