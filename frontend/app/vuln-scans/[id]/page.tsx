@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Globe, Calendar, Clock, ExternalLink, Server, Lock, Shield } from "lucide-react";
+import { Globe, Calendar, Clock, ExternalLink, Server, Cpu, Network, Lock, Shield, Brain } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
@@ -731,6 +731,48 @@ function OverviewTab({
           <span className="text-sm font-semibold tabular-nums">{d.total}</span>
         </div>
       </div>
+
+      {/* HVT + exposure summary */}
+      {(d.hvt_count > 0 || d.public_service_count > 0) && (
+        <div className="flex flex-wrap gap-3">
+          {d.hvt_count > 0 && (
+            <div className="inline-flex items-center gap-2 rounded-md border border-orange-300 bg-orange-50 dark:bg-orange-950/20 px-3 py-2">
+              <Shield className="h-3.5 w-3.5 text-orange-600" />
+              <span className="text-xs text-muted-foreground">HVT signals</span>
+              <span className="text-sm font-semibold tabular-nums text-orange-600">{d.hvt_count}</span>
+            </div>
+          )}
+          {d.public_service_count > 0 && (
+            <div className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
+              <span className="text-xs text-muted-foreground">Public web services</span>
+              <span className="text-sm font-semibold tabular-nums">{d.public_service_count}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Top 3 risk-scored vulns */}
+      {d.top_risk_vulns.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Highest Risk
+          </h3>
+          <div className="space-y-1.5">
+            {d.top_risk_vulns.map((v) => (
+              <div key={v.id} className="flex items-center gap-2 rounded border border-border bg-card px-3 py-2">
+                <SeverityBadge severity={v.severity} />
+                <span className="text-sm font-medium flex-1 truncate">{v.title}</span>
+                {v.kev && <span className="text-xs font-bold text-red-600">KEV</span>}
+                {v.risk_score != null && (
+                  <span className="text-xs font-semibold tabular-nums text-muted-foreground">
+                    {v.risk_score.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -806,10 +848,12 @@ function VulnerabilitiesTab({ scanId }: { scanId: string }) {
   const qc = useQueryClient();
   const [severity, setSeverity] = useState("All");
   const [status, setStatus] = useState("All");
+  const [kevOnly, setKevOnly] = useState(false);
+  const [hvtOnly, setHvtOnly] = useState(false);
   const [offset, setOffset] = useState(0);
 
   // Reset offset when filters change
-  useEffect(() => setOffset(0), [severity, status]);
+  useEffect(() => setOffset(0), [severity, status, kevOnly, hvtOnly]);
 
   const params = new URLSearchParams({
     offset: String(offset),
@@ -817,9 +861,11 @@ function VulnerabilitiesTab({ scanId }: { scanId: string }) {
   });
   if (severity !== "All") params.set("severity", severity);
   if (status !== "All") params.set("status", status);
+  if (kevOnly) params.set("kev_only", "true");
+  if (hvtOnly) params.set("hvt_only", "true");
 
   const query = useQuery({
-    queryKey: ["vuln-list", scanId, severity, status, offset],
+    queryKey: ["vuln-list", scanId, severity, status, kevOnly, hvtOnly, offset],
     queryFn: () =>
       api<VulnsPage>(`/vuln-scans/${scanId}/vulnerabilities?${params.toString()}`),
   });
@@ -867,6 +913,26 @@ function VulnerabilitiesTab({ scanId }: { scanId: string }) {
             </SelectContent>
           </Select>
         </div>
+        <button
+          onClick={() => setKevOnly(!kevOnly)}
+          className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+            kevOnly
+              ? "border-red-400 bg-red-100 text-red-700"
+              : "border-border hover:bg-muted"
+          }`}
+        >
+          KEV only
+        </button>
+        <button
+          onClick={() => setHvtOnly(!hvtOnly)}
+          className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+            hvtOnly
+              ? "border-orange-400 bg-orange-100 text-orange-700"
+              : "border-border hover:bg-muted"
+          }`}
+        >
+          HVT assets only
+        </button>
         {total > 0 && (
           <span className="text-xs text-muted-foreground ml-auto">
             {total} result{total !== 1 ? "s" : ""}
@@ -895,6 +961,7 @@ function VulnerabilitiesTab({ scanId }: { scanId: string }) {
                   "Title",
                   "CVE IDs",
                   "CVSS",
+                  "Risk",
                   "Asset",
                   "Status",
                   "First Seen",
@@ -935,6 +1002,9 @@ function VulnerabilitiesTab({ scanId }: { scanId: string }) {
                   </td>
                   <td className="px-3 py-2.5 tabular-nums text-xs">
                     {v.cvss_v3 != null ? v.cvss_v3.toFixed(1) : "—"}
+                  </td>
+                  <td className="px-3 py-2.5 tabular-nums text-xs">
+                    {v.risk_score != null ? v.risk_score.toFixed(2) : "—"}
                   </td>
                   <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground max-w-[160px] truncate">
                     {v.asset_label}
@@ -1074,7 +1144,10 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const VALID_TABS = ["overview", "vulnerabilities", "diff"];
+  const VALID_TABS = [
+    "overview", "vulnerabilities", "by-service", "by-tech",
+    "endpoints", "tls", "hvts", "triage", "diff",
+  ];
   const rawTab = searchParams.get("tab");
   const defaultTab = rawTab && VALID_TABS.includes(rawTab) ? rawTab : "overview";
 
@@ -1194,9 +1267,33 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
         value={defaultTab}
         onValueChange={(t) => router.replace(`?tab=${t}`, { scroll: false })}
       >
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="vulnerabilities">Vulnerabilities</TabsTrigger>
+          <TabsTrigger value="by-service">
+            <Server className="h-3.5 w-3.5 mr-1.5" />
+            By Service
+          </TabsTrigger>
+          <TabsTrigger value="by-tech">
+            <Cpu className="h-3.5 w-3.5 mr-1.5" />
+            By Tech
+          </TabsTrigger>
+          <TabsTrigger value="endpoints">
+            <Network className="h-3.5 w-3.5 mr-1.5" />
+            Endpoints
+          </TabsTrigger>
+          <TabsTrigger value="tls">
+            <Lock className="h-3.5 w-3.5 mr-1.5" />
+            TLS
+          </TabsTrigger>
+          <TabsTrigger value="hvts">
+            <Shield className="h-3.5 w-3.5 mr-1.5" />
+            HVTs
+          </TabsTrigger>
+          <TabsTrigger value="triage">
+            <Brain className="h-3.5 w-3.5 mr-1.5" />
+            Triage
+          </TabsTrigger>
           <TabsTrigger value="diff">Diff</TabsTrigger>
         </TabsList>
 
@@ -1209,6 +1306,24 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
         </TabsContent>
         <TabsContent value="vulnerabilities">
           <VulnerabilitiesTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="by-service">
+          <ByServiceTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="by-tech">
+          <ByTechTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="endpoints">
+          <EndpointsTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="tls">
+          <TlsTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="hvts">
+          <HvtsTab scanId={params.id} />
+        </TabsContent>
+        <TabsContent value="triage">
+          <TriageTab scanId={params.id} />
         </TabsContent>
         <TabsContent value="diff">
           <DiffTab scanId={params.id} />
