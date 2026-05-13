@@ -59,6 +59,9 @@ function buildBreadcrumb(pathname: string): string[] {
   if (pathname === "/dashboard/recon-jobs") return ["Basic Recon", "Recon Jobs"];
   if (pathname.startsWith("/scans/")) return ["Scan Detail"];
   if (pathname === "/vuln-scans") return ["Vulnerability Scans"];
+  if (pathname.startsWith("/vuln-scans/") && pathname.includes("/endpoints/")) {
+    return ["Vulnerability Scans", "Detail", "Endpoint"];
+  }
   if (pathname.startsWith("/vuln-scans/")) return ["Vulnerability Scans", "Detail"];
   if (pathname === "/targets") return ["Targets"];
   if (pathname === "/reports") return ["Reports"];
