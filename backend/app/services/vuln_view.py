@@ -8,11 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Scan, ScanKind, ScanStatus
 from app.models.asset import Asset
 from app.models.endpoint import Endpoint
+from app.models.hvt_signal import HvtSignal
 from app.models.service import Service
 from app.models.technology import Technology
 from app.models.tls_observation import TlsObservation
 from app.models.vulnerability import Vulnerability, VulnSeverity
 from app.models.vuln_run_match import VulnRunMatch
+from app.services.hvt_score import compute_hvt_score
 from sqlalchemy import desc
 
 
@@ -406,3 +408,99 @@ async def build_tls_view(db: AsyncSession, scan_id: UUID) -> list[dict]:
         })
 
     return result
+
+
+async def build_hvt_rows(db: AsyncSession, scan_id: UUID) -> list[dict]:
+    """HVT signals for the target of this scan, grouped by asset and scored."""
+    target_id = await db.scalar(select(Scan.target_id).where(Scan.id == scan_id))
+    if target_id is None:
+        return []
+
+    rows = (
+        await db.execute(
+            select(HvtSignal, Asset.canonical_key.label("asset_label"))
+            .join(Asset, Asset.id == HvtSignal.asset_id)
+            .where(HvtSignal.target_id == target_id)
+            .order_by(HvtSignal.score.desc())
+        )
+    ).all()
+
+    groups: dict = {}
+    for sig, asset_label in rows:
+        key = str(sig.asset_id)
+        if key not in groups:
+            groups[key] = {
+                "asset_id": sig.asset_id,
+                "asset_label": asset_label,
+                "signals": [],
+            }
+        groups[key]["signals"].append({
+            "signal_type": sig.signal_type.value if hasattr(sig.signal_type, "value") else str(sig.signal_type),
+            "score": sig.score,
+            "confidence": sig.confidence,
+            "evidence": sig.evidence or {},
+        })
+
+    # Compute hvt_score per asset using existing service
+    result = []
+    for g in groups.values():
+        class _Sig:
+            def __init__(self, d):
+                self.signal_type = d["signal_type"]
+                self.score = d["score"]
+        mock_sigs = [_Sig(s) for s in g["signals"]]
+        g["hvt_score"] = round(compute_hvt_score(mock_sigs), 3)
+        result.append(g)
+
+    return sorted(result, key=lambda x: x["hvt_score"], reverse=True)
+
+
+async def build_triage_view(db: AsyncSession, scan_id: UUID, *, limit: int = 20) -> dict:
+    """Top-N vulns by risk_score for AI triage display."""
+    rows = (
+        await db.execute(
+            select(Vulnerability, Asset.canonical_key.label("asset_label"))
+            .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
+            .join(Asset, Asset.id == Vulnerability.asset_id)
+            .where(
+                VulnRunMatch.scan_id == scan_id,
+                Vulnerability.status.notin_(["fixed", "false_positive", "wont_fix"]),
+            )
+            .order_by(desc(Vulnerability.risk_score).nullslast())
+            .limit(limit)
+        )
+    ).all()
+
+    total_scored: int = (
+        await db.scalar(
+            select(func.count())
+            .select_from(
+                select(Vulnerability.id)
+                .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
+                .where(
+                    VulnRunMatch.scan_id == scan_id,
+                    Vulnerability.risk_score.is_not(None),
+                )
+                .subquery()
+            )
+        )
+    ) or 0
+
+    triage_rows = [
+        {
+            "id": v.id,
+            "title": v.title,
+            "severity": v.severity.value if hasattr(v.severity, "value") else str(v.severity),
+            "risk_score": v.risk_score,
+            "cvss_v3": v.cvss_v3,
+            "epss": v.epss,
+            "kev": v.kev,
+            "cve_ids": v.cve_ids or [],
+            "asset_label": asset_label,
+            "description": v.description or "",
+            "remediation": v.remediation,
+        }
+        for v, asset_label in rows
+    ]
+
+    return {"rows": triage_rows, "total_with_risk_score": total_scored}
