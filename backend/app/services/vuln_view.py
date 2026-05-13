@@ -9,7 +9,7 @@ from app.models import Scan, ScanKind, ScanStatus
 from app.models.asset import Asset
 from app.models.endpoint import Endpoint
 from app.models.hvt_signal import HvtSignal
-from app.models.service import Service
+from app.models.service import Service, ServiceClassification
 from app.models.technology import Technology
 from app.models.tls_observation import TlsObservation
 from app.models.vulnerability import Vulnerability, VulnSeverity
@@ -25,6 +25,8 @@ class VulnRow:
     title: str
     severity: str
     cvss_v3: float | None
+    epss: float | None
+    risk_score: float | None
     cve_ids: list[str]
     cwe_ids: list[str]
     status: str
@@ -37,7 +39,9 @@ class VulnRow:
 
 
 async def build_vuln_overview(db: AsyncSession, scan_id: UUID) -> dict:
-    """Counts by severity + KEV count + distinct CVE count for a vuln scan."""
+    """Counts by severity + KEV count + distinct CVE count + HVT/exposure cards."""
+    target_id = await db.scalar(select(Scan.target_id).where(Scan.id == scan_id))
+
     rows = await db.execute(
         select(Vulnerability.severity, Vulnerability.kev, Vulnerability.cve_ids)
         .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
@@ -67,6 +71,54 @@ async def build_vuln_overview(db: AsyncSession, scan_id: UUID) -> dict:
             case VulnSeverity.INFO:
                 info += 1
 
+    # HVT count + public service count (M-Vuln-8)
+    hvt_count = 0
+    public_service_count = 0
+    top_risk_vulns: list[dict] = []
+
+    if target_id is not None:
+        hvt_count = (
+            await db.scalar(
+                select(func.count(HvtSignal.id)).where(HvtSignal.target_id == target_id)
+            )
+        ) or 0
+
+        public_service_count = (
+            await db.scalar(
+                select(func.count(Service.id)).where(
+                    Service.target_id == target_id,
+                    Service.classification == ServiceClassification.web,
+                )
+            )
+        ) or 0
+
+        # Top 3 by risk_score for this scan
+        top_rows = (
+            await db.execute(
+                select(
+                    Vulnerability.id,
+                    Vulnerability.title,
+                    Vulnerability.severity,
+                    Vulnerability.risk_score,
+                    Vulnerability.kev,
+                )
+                .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
+                .where(VulnRunMatch.scan_id == scan_id, Vulnerability.risk_score.is_not(None))
+                .order_by(desc(Vulnerability.risk_score))
+                .limit(3)
+            )
+        ).all()
+        top_risk_vulns = [
+            {
+                "id": str(r.id),
+                "title": r.title,
+                "severity": r.severity.value if hasattr(r.severity, "value") else str(r.severity),
+                "risk_score": r.risk_score,
+                "kev": r.kev,
+            }
+            for r in top_rows
+        ]
+
     return {
         "total": total,
         "critical": critical,
@@ -76,6 +128,9 @@ async def build_vuln_overview(db: AsyncSession, scan_id: UUID) -> dict:
         "info": info,
         "kev_count": kev_count,
         "cve_count": len(all_cves),
+        "hvt_count": hvt_count,
+        "public_service_count": public_service_count,
+        "top_risk_vulns": top_risk_vulns,
     }
 
 
@@ -85,10 +140,12 @@ async def build_vuln_rows(
     *,
     severity: str | None = None,
     status: str | None = None,
+    kev_only: bool = False,
+    hvt_only: bool = False,
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[int, list[VulnRow]]:
-    """Paginated vulnerabilities for a vuln scan, scoped via vuln_run_matches."""
+    """Paginated vulns for a scan. Default sort: risk_score DESC NULLS LAST."""
     base_q = (
         select(Vulnerability, Asset.canonical_key.label("asset_label"))
         .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
@@ -100,11 +157,24 @@ async def build_vuln_rows(
         base_q = base_q.where(Vulnerability.severity == VulnSeverity(severity))
     if status is not None:
         base_q = base_q.where(Vulnerability.status == status)
+    if kev_only:
+        base_q = base_q.where(Vulnerability.kev.is_(True))
+    if hvt_only:
+        target_id_subq = select(Scan.target_id).where(Scan.id == scan_id).scalar_subquery()
+        hvt_asset_ids_subq = (
+            select(HvtSignal.asset_id).where(HvtSignal.target_id == target_id_subq).distinct()
+        )
+        base_q = base_q.where(Vulnerability.asset_id.in_(hvt_asset_ids_subq))
 
     count_q = select(func.count()).select_from(base_q.subquery())
     total: int = (await db.scalar(count_q)) or 0
 
-    page_q = base_q.order_by(Vulnerability.severity, Vulnerability.first_seen.desc()).offset(offset).limit(limit)
+    page_q = (
+        base_q
+        .order_by(desc(Vulnerability.risk_score).nullslast(), Vulnerability.first_seen.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     result = await db.execute(page_q)
 
     vuln_rows = [
@@ -114,6 +184,8 @@ async def build_vuln_rows(
             title=v.title,
             severity=v.severity.value,
             cvss_v3=v.cvss_v3,
+            epss=v.epss,
+            risk_score=v.risk_score,
             cve_ids=v.cve_ids or [],
             cwe_ids=v.cwe_ids or [],
             status=v.status.value,
@@ -175,6 +247,8 @@ async def build_vuln_diff(db: AsyncSession, scan_id: UUID) -> dict:
             title=v.title,
             severity=v.severity.value,
             cvss_v3=v.cvss_v3,
+            epss=v.epss,
+            risk_score=v.risk_score,
             cve_ids=v.cve_ids or [],
             cwe_ids=v.cwe_ids or [],
             status=v.status.value,
