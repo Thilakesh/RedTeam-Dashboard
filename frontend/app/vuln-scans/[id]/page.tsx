@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Globe, Calendar, Clock, ExternalLink } from "lucide-react";
+import { Globe, Calendar, Clock, ExternalLink, Server, Lock, Shield } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,13 @@ import {
 import {
   api,
   sseUrl,
+  type ByServiceResponse,
+  type ByTechResponse,
+  type EndpointsPage,
+  type EndpointRow,
+  type HvtResponse,
+  type TlsResponse,
+  type TriageResponse,
   type VulnDiff,
   type VulnScanDetail,
   type VulnOverview,
@@ -102,6 +109,519 @@ function CveBadges({ ids }: { ids: string[] }) {
         <span className="text-xs text-muted-foreground">+{extra} more</span>
       )}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ByService tab
+// ---------------------------------------------------------------------------
+
+function ByServiceTab({ scanId }: { scanId: string }) {
+  const q = useQuery({
+    queryKey: ["vuln-by-service", scanId],
+    queryFn: () => api<ByServiceResponse>(`/vuln-scans/${scanId}/by-service`),
+  });
+
+  if (q.isLoading) return <p className="mt-4 text-sm text-muted-foreground">Loading…</p>;
+  if (q.isError || !q.data) return <p className="mt-4 text-sm text-destructive">Failed to load.</p>;
+
+  const rows = q.data.rows;
+  if (rows.length === 0)
+    return (
+      <div className="mt-6 rounded-lg border border-dashed border-border p-8 text-center">
+        <p className="text-sm text-muted-foreground">No service-linked vulnerabilities found.</p>
+      </div>
+    );
+
+  const SEV_ORDER = ["CRITICAL", "HIGH", "MED", "LOW", "INFO"];
+  const SEV_COLOR: Record<string, string> = {
+    CRITICAL: "bg-red-500",
+    HIGH: "bg-orange-500",
+    MED: "bg-yellow-500",
+    LOW: "bg-blue-400",
+    INFO: "bg-gray-400",
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      {rows.map((row, i) => (
+        <div key={row.service_id ?? `none-${i}`} className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div className="flex items-center gap-2">
+                <Server className="h-4 w-4 text-muted-foreground" />
+                <span className="font-mono text-sm font-medium">{row.service_key}</span>
+                {row.classification !== "unknown" && (
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs">
+                    {row.classification}
+                  </span>
+                )}
+              </div>
+              {(row.product || row.version) && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {[row.product, row.version].filter(Boolean).join(" ")}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">{row.vuln_count} vulns</span>
+              {row.max_risk_score != null && (
+                <span className="text-xs font-semibold tabular-nums">
+                  Risk: {row.max_risk_score.toFixed(2)}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {SEV_ORDER.filter((s) => (row.severities[s] ?? 0) > 0).map((s) => (
+              <span
+                key={s}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold text-white ${SEV_COLOR[s]}`}
+              >
+                {s} {row.severities[s]}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ByTech tab
+// ---------------------------------------------------------------------------
+
+function ByTechTab({ scanId }: { scanId: string }) {
+  const q = useQuery({
+    queryKey: ["vuln-by-tech", scanId],
+    queryFn: () => api<ByTechResponse>(`/vuln-scans/${scanId}/by-technology`),
+  });
+
+  if (q.isLoading) return <p className="mt-4 text-sm text-muted-foreground">Loading…</p>;
+  if (q.isError || !q.data) return <p className="mt-4 text-sm text-destructive">Failed to load.</p>;
+
+  const rows = q.data.rows;
+  if (rows.length === 0)
+    return (
+      <div className="mt-6 rounded-lg border border-dashed border-border p-8 text-center">
+        <p className="text-sm text-muted-foreground">No technology-linked vulnerabilities found.</p>
+      </div>
+    );
+
+  const SEV_ORDER = ["CRITICAL", "HIGH", "MED", "LOW", "INFO"];
+  const SEV_COLOR: Record<string, string> = {
+    CRITICAL: "bg-red-500", HIGH: "bg-orange-500",
+    MED: "bg-yellow-500", LOW: "bg-blue-400", INFO: "bg-gray-400",
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-border overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/50 border-b border-border">
+          <tr>
+            {["Technology", "Category", "CPE", "Vulns", "Severity breakdown", "Max Risk"].map((h) => (
+              <th key={h} className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={row.technology_id ?? i} className="border-b border-border hover:bg-muted/30">
+              <td className="px-3 py-2.5 font-medium">
+                {row.name}
+                {row.version && <span className="ml-1 text-xs text-muted-foreground">{row.version}</span>}
+              </td>
+              <td className="px-3 py-2.5 text-xs text-muted-foreground">{row.category ?? "—"}</td>
+              <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground max-w-[200px] truncate">{row.cpe ?? "—"}</td>
+              <td className="px-3 py-2.5 tabular-nums font-semibold">{row.vuln_count}</td>
+              <td className="px-3 py-2.5">
+                <div className="flex flex-wrap gap-1">
+                  {SEV_ORDER.filter((s) => (row.severities[s] ?? 0) > 0).map((s) => (
+                    <span key={s} className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-semibold text-white ${SEV_COLOR[s]}`}>
+                      {s[0]}{row.severities[s]}
+                    </span>
+                  ))}
+                </div>
+              </td>
+              <td className="px-3 py-2.5 tabular-nums text-xs">
+                {row.max_risk_score != null ? row.max_risk_score.toFixed(2) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Endpoints tab
+// ---------------------------------------------------------------------------
+
+const ENDPOINT_FLAG_OPTIONS = [
+  { label: "All", value: "all" },
+  { label: "Admin", value: "is_admin" },
+  { label: "Login", value: "is_login" },
+  { label: "API", value: "is_api" },
+  { label: "Upload", value: "is_upload" },
+];
+
+function EndpointsTab({ scanId }: { scanId: string }) {
+  const [filter, setFilter] = useState("all");
+  const [offset, setOffset] = useState(0);
+  const PAGE_SIZE = 50;
+
+  useEffect(() => setOffset(0), [filter]);
+
+  const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
+  if (filter === "is_admin") params.set("is_admin", "true");
+  else if (filter === "is_login") params.set("is_login", "true");
+  else if (filter === "is_api") params.set("is_api", "true");
+  else if (filter === "is_upload") params.set("is_upload", "true");
+
+  const q = useQuery({
+    queryKey: ["vuln-endpoints", scanId, filter, offset],
+    queryFn: () => api<EndpointsPage>(`/vuln-scans/${scanId}/endpoints?${params}`),
+  });
+
+  const items = q.data?.items ?? [];
+  const total = q.data?.total ?? 0;
+  const hasMore = offset + PAGE_SIZE < total;
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {ENDPOINT_FLAG_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setFilter(opt.value)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              filter === opt.value
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border hover:bg-muted"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+        {total > 0 && (
+          <span className="ml-auto text-xs text-muted-foreground">{total} endpoint{total !== 1 ? "s" : ""}</span>
+        )}
+      </div>
+
+      {q.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : q.isError ? (
+        <p className="text-sm text-destructive">Failed to load endpoints.</p>
+      ) : items.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-8 text-center">
+          <p className="text-sm text-muted-foreground">No endpoints discovered yet.</p>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 border-b border-border">
+              <tr>
+                {["Method", "URL", "Status", "Title", "Flags", "Source"].map((h) => (
+                  <th key={h} className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((ep: EndpointRow) => (
+                <tr key={ep.id} className="border-b border-border hover:bg-muted/30">
+                  <td className="px-3 py-2 text-xs font-mono font-semibold">{ep.method}</td>
+                  <td className="px-3 py-2 max-w-[300px]">
+                    <Link
+                      href={`/vuln-scans/${scanId}/endpoints/${ep.id}`}
+                      className="text-xs font-mono text-primary hover:underline truncate block"
+                      title={ep.url}
+                    >
+                      {ep.path}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 text-xs tabular-nums">
+                    {ep.status_code ?? "—"}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground max-w-[180px] truncate">
+                    {ep.title ?? "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {ep.is_admin && <span className="rounded bg-red-100 text-red-700 px-1.5 py-0.5 text-xs font-semibold">admin</span>}
+                      {ep.is_login && <span className="rounded bg-yellow-100 text-yellow-700 px-1.5 py-0.5 text-xs font-semibold">login</span>}
+                      {ep.is_api && <span className="rounded bg-blue-100 text-blue-700 px-1.5 py-0.5 text-xs font-semibold">api</span>}
+                      {ep.is_upload && <span className="rounded bg-purple-100 text-purple-700 px-1.5 py-0.5 text-xs font-semibold">upload</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">{ep.source_tool}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(offset > 0 || hasMore) && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {offset > 0 && (
+            <button onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))} className="px-3 py-1.5 rounded border border-border hover:bg-muted">
+              Previous
+            </button>
+          )}
+          <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}</span>
+          {hasMore && (
+            <button onClick={() => setOffset(offset + PAGE_SIZE)} className="px-3 py-1.5 rounded border border-border hover:bg-muted">
+              Load more
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TLS tab
+// ---------------------------------------------------------------------------
+
+function TlsTab({ scanId }: { scanId: string }) {
+  const q = useQuery({
+    queryKey: ["vuln-tls", scanId],
+    queryFn: () => api<TlsResponse>(`/vuln-scans/${scanId}/tls`),
+  });
+
+  if (q.isLoading) return <p className="mt-4 text-sm text-muted-foreground">Loading…</p>;
+  if (q.isError || !q.data) return <p className="mt-4 text-sm text-destructive">Failed to load TLS data.</p>;
+
+  const rows = q.data.rows;
+  if (rows.length === 0)
+    return (
+      <div className="mt-6 rounded-lg border border-dashed border-border p-8 text-center">
+        <p className="text-sm text-muted-foreground">No TLS observations found. Run testssl in the vuln profile to populate this tab.</p>
+      </div>
+    );
+
+  const gradeColor = (grade: string | null) => {
+    if (!grade) return "text-muted-foreground";
+    if (grade.startsWith("A")) return "text-green-600";
+    if (grade.startsWith("B")) return "text-yellow-600";
+    return "text-red-600";
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      {rows.map((row) => (
+        <div key={row.service_id} className={`rounded-lg border p-4 ${row.is_expired ? "border-red-300 bg-red-50 dark:bg-red-950/20" : "border-border bg-card"}`}>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 text-muted-foreground" />
+              <span className="font-mono text-sm font-medium">{row.service_key}</span>
+              {row.grade && (
+                <span className={`text-lg font-bold ${gradeColor(row.grade)}`}>{row.grade}</span>
+              )}
+            </div>
+            {row.cert_not_after && (
+              <div className="text-xs">
+                {row.is_expired ? (
+                  <span className="font-semibold text-red-600">Certificate expired {Math.abs(row.days_until_expiry!)} days ago</span>
+                ) : (
+                  <span className={row.days_until_expiry! < 30 ? "text-orange-600 font-semibold" : "text-muted-foreground"}>
+                    Expires in {row.days_until_expiry} days
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          {row.cert_subject && (
+            <p className="mt-2 text-xs text-muted-foreground truncate">
+              Subject: {row.cert_subject}
+            </p>
+          )}
+          {row.deprecated_protocols.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {row.deprecated_protocols.map((p) => (
+                <span key={p} className="rounded bg-orange-100 text-orange-700 px-2 py-0.5 text-xs font-semibold">
+                  {p} enabled
+                </span>
+              ))}
+            </div>
+          )}
+          {row.weak_ciphers.length > 0 && (
+            <div className="mt-2">
+              <span className="text-xs text-muted-foreground">Weak ciphers: </span>
+              <span className="text-xs text-orange-600">{row.weak_ciphers.join(", ")}</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HVTs tab
+// ---------------------------------------------------------------------------
+
+const HVT_SIGNAL_LABELS: Record<string, string> = {
+  admin_panel: "Admin Panel",
+  login_form: "Login Form",
+  signup_form: "Sign-up Form",
+  upload_form: "Upload Form",
+  api_doc: "API Docs",
+  dev_portal: "Dev Portal",
+  jenkins: "Jenkins",
+  wordpress: "WordPress",
+  gitlab: "GitLab",
+  k8s_dashboard: "K8s Dashboard",
+  exposed_index: "Exposed Index",
+  swagger: "Swagger",
+  graphql: "GraphQL",
+  git_repo: "Git Repo",
+  env_file: ".env File",
+  other: "Other",
+};
+
+const HVT_SIGNAL_COLOR: Record<string, string> = {
+  admin_panel: "bg-red-100 text-red-700",
+  jenkins: "bg-red-100 text-red-700",
+  git_repo: "bg-red-100 text-red-700",
+  env_file: "bg-red-100 text-red-700",
+  k8s_dashboard: "bg-red-100 text-red-700",
+  login_form: "bg-orange-100 text-orange-700",
+  upload_form: "bg-orange-100 text-orange-700",
+  wordpress: "bg-blue-100 text-blue-700",
+  gitlab: "bg-purple-100 text-purple-700",
+  api_doc: "bg-blue-100 text-blue-700",
+  swagger: "bg-blue-100 text-blue-700",
+  graphql: "bg-blue-100 text-blue-700",
+};
+
+function HvtsTab({ scanId }: { scanId: string }) {
+  const q = useQuery({
+    queryKey: ["vuln-hvts", scanId],
+    queryFn: () => api<HvtResponse>(`/vuln-scans/${scanId}/hvts`),
+  });
+
+  if (q.isLoading) return <p className="mt-4 text-sm text-muted-foreground">Loading…</p>;
+  if (q.isError || !q.data) return <p className="mt-4 text-sm text-destructive">Failed to load HVT data.</p>;
+
+  const rows = q.data.rows;
+  if (rows.length === 0)
+    return (
+      <div className="mt-6 rounded-lg border border-dashed border-border p-8 text-center">
+        <p className="text-sm text-muted-foreground">No high-value target signals detected. Run panel_detector or swagger_discoverer to populate this tab.</p>
+      </div>
+    );
+
+  return (
+    <div className="mt-4 space-y-3">
+      {rows.map((row) => (
+        <div key={row.asset_id} className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+              <span className="font-mono text-sm font-medium">{row.asset_label}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-muted-foreground">HVT score</div>
+              <div
+                className={`text-sm font-bold tabular-nums ${
+                  row.hvt_score > 0.7 ? "text-red-600" : row.hvt_score > 0.4 ? "text-orange-500" : "text-muted-foreground"
+                }`}
+              >
+                {row.hvt_score.toFixed(2)}
+              </div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {row.signals.map((sig, i) => {
+              const colorClass = HVT_SIGNAL_COLOR[sig.signal_type] ?? "bg-gray-100 text-gray-700";
+              const label = HVT_SIGNAL_LABELS[sig.signal_type] ?? sig.signal_type;
+              return (
+                <span
+                  key={i}
+                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${colorClass}`}
+                  title={`Score: ${sig.score.toFixed(2)}, Confidence: ${sig.confidence}%`}
+                >
+                  {label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Triage tab
+// ---------------------------------------------------------------------------
+
+function TriageTab({ scanId }: { scanId: string }) {
+  const q = useQuery({
+    queryKey: ["vuln-triage", scanId],
+    queryFn: () => api<TriageResponse>(`/vuln-scans/${scanId}/triage`),
+  });
+
+  if (q.isLoading) return <p className="mt-4 text-sm text-muted-foreground">Loading triage data…</p>;
+  if (q.isError || !q.data) return <p className="mt-4 text-sm text-destructive">Failed to load triage data.</p>;
+
+  const { rows, total_with_risk_score } = q.data;
+
+  if (rows.length === 0)
+    return (
+      <div className="mt-6 rounded-lg border border-dashed border-border p-8 text-center">
+        <p className="text-sm text-muted-foreground">No triage data yet. Risk scores are populated by the correlator stage.</p>
+      </div>
+    );
+
+  return (
+    <div className="mt-4 space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Top {rows.length} vulnerabilities by composite risk score. {total_with_risk_score} total have been scored.
+      </p>
+      {rows.map((row, i) => (
+        <div key={row.id} className="rounded-lg border border-border bg-card p-4 space-y-2">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-muted-foreground tabular-nums w-5">#{i + 1}</span>
+              <SeverityBadge severity={row.severity} />
+              <span className="font-medium text-sm">{row.title}</span>
+              {row.kev && (
+                <span className="rounded bg-red-100 text-red-700 px-1.5 py-0.5 text-xs font-bold">KEV</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {row.risk_score != null && (
+                <span className="font-semibold text-foreground">Risk: {row.risk_score.toFixed(2)}</span>
+              )}
+              {row.cvss_v3 != null && <span>CVSS: {row.cvss_v3.toFixed(1)}</span>}
+              {row.epss != null && <span>EPSS: {(row.epss * 100).toFixed(1)}%</span>}
+              <span className="font-mono">{row.asset_label}</span>
+            </div>
+          </div>
+          {row.cve_ids.length > 0 && <CveBadges ids={row.cve_ids} />}
+          {row.description && (
+            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
+              {row.description}
+            </p>
+          )}
+          {row.remediation && (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <p className="text-xs font-semibold mb-1">Remediation</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{row.remediation}</p>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
