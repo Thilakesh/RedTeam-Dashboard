@@ -256,6 +256,15 @@ export type VulnOverview = {
   info: number;
   kev_count: number;
   cve_count: number;
+  hvt_count: number;
+  public_service_count: number;
+  top_risk_vulns: Array<{
+    id: string;
+    title: string;
+    severity: string;
+    risk_score: number | null;
+    kev: boolean;
+  }>;
 };
 
 export type VulnOut = {
@@ -264,6 +273,8 @@ export type VulnOut = {
   title: string;
   severity: string;
   cvss_v3: number | null;
+  epss: number | null;
+  risk_score: number | null;
   cve_ids: string[];
   cwe_ids: string[];
   status: string;
@@ -286,4 +297,125 @@ export type VulnDiff = {
   seen: VulnOut[];
   fixed: VulnOut[];
   has_prior: boolean;
+};
+
+// By Service
+export type ByServiceRow = {
+  service_id: string | null;
+  service_key: string;
+  host: string | null;
+  port: number | null;
+  classification: string;
+  product: string | null;
+  version: string | null;
+  vuln_count: number;
+  severities: Record<string, number>;
+  max_risk_score: number | null;
+};
+export type ByServiceResponse = { rows: ByServiceRow[] };
+
+// By Technology
+export type ByTechRow = {
+  technology_id: string | null;
+  name: string;
+  version: string | null;
+  cpe: string | null;
+  category: string | null;
+  vuln_count: number;
+  severities: Record<string, number>;
+  max_risk_score: number | null;
+};
+export type ByTechResponse = { rows: ByTechRow[] };
+
+// Endpoints
+export type EndpointRow = {
+  id: string;
+  url: string;
+  path: string;
+  method: string;
+  status_code: number | null;
+  content_type: string | null;
+  title: string | null;
+  is_login: boolean;
+  is_signup: boolean;
+  is_upload: boolean;
+  is_api: boolean;
+  is_admin: boolean;
+  source_tool: string;
+  first_seen: string;
+  last_seen: string;
+};
+export type EndpointsPage = { total: number; items: EndpointRow[] };
+
+// TLS
+export type TlsRow = {
+  service_id: string;
+  service_key: string;
+  cert_subject: string | null;
+  cert_issuer: string | null;
+  cert_not_after: string | null;
+  days_until_expiry: number | null;
+  is_expired: boolean;
+  grade: string | null;
+  weak_ciphers: string[];
+  deprecated_protocols: string[];
+  observed_at: string;
+};
+export type TlsResponse = { rows: TlsRow[] };
+
+// HVTs
+export type HvtSignalItem = {
+  signal_type: string;
+  score: number;
+  confidence: number;
+  evidence: Record<string, unknown>;
+};
+export type HvtRow = {
+  asset_id: string;
+  asset_label: string;
+  hvt_score: number;
+  signals: HvtSignalItem[];
+};
+export type HvtResponse = { rows: HvtRow[] };
+
+// Triage
+export type TriageVulnRow = {
+  id: string;
+  title: string;
+  severity: string;
+  risk_score: number | null;
+  cvss_v3: number | null;
+  epss: number | null;
+  kev: boolean;
+  cve_ids: string[];
+  asset_label: string;
+  description: string;
+  remediation: string | null;
+};
+export type TriageResponse = {
+  rows: TriageVulnRow[];
+  total_with_risk_score: number;
+};
+
+// Target Risk
+export type TargetRiskVulnRow = {
+  id: string;
+  title: string;
+  severity: string;
+  risk_score: number | null;
+  kev: boolean;
+  asset_label: string;
+  status: string;
+};
+export type TargetRiskView = {
+  target_id: string;
+  target_domain: string;
+  open_counts: Record<string, number>;
+  top_risk_vulns: TargetRiskVulnRow[];
+  hvt_count: number;
+  hvt_signal_summary: Record<string, number>;
+  endpoint_count: number;
+  latest_vuln_scan_id: string | null;
+  latest_vuln_scan_status: string | null;
+  latest_vuln_scan_created_at: string | null;
 };
