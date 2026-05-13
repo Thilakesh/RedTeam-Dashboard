@@ -63,6 +63,7 @@ function buildBreadcrumb(pathname: string): string[] {
     return ["Vulnerability Scans", "Detail", "Endpoint"];
   }
   if (pathname.startsWith("/vuln-scans/")) return ["Vulnerability Scans", "Detail"];
+  if (pathname.match(/^\/targets\/[^/]+\/risk$/)) return ["Targets", "Risk View"];
   if (pathname === "/targets") return ["Targets"];
   if (pathname === "/reports") return ["Reports"];
   if (pathname === "/settings") return ["Settings"];
