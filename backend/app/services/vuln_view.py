@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Scan, ScanKind, ScanStatus
@@ -15,7 +15,6 @@ from app.models.tls_observation import TlsObservation
 from app.models.vulnerability import Vulnerability, VulnSeverity
 from app.models.vuln_run_match import VulnRunMatch
 from app.services.hvt_score import compute_hvt_score
-from sqlalchemy import desc
 
 
 @dataclass
