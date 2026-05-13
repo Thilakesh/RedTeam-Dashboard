@@ -14,7 +14,22 @@ from app.api.deps import CurrentUser, get_current_user, get_current_user_sse
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import Scan, ScanKind, ScanStatus, Target
+from app.models.endpoint import Endpoint
 from app.schemas.vuln import (
+    ByServiceResponse,
+    ByServiceRow,
+    ByTechResponse,
+    ByTechRow,
+    EndpointDetail,
+    EndpointRow,
+    EndpointsPage,
+    HvtResponse,
+    HvtRow,
+    HvtSignalItem,
+    TlsResponse,
+    TlsRow,
+    TriageResponse,
+    TriageVulnRow,
     VulnDiffOut,
     VulnOverview,
     VulnOut,
@@ -22,6 +37,7 @@ from app.schemas.vuln import (
     VulnScanDetailOut,
     VulnScanOut,
     VulnsPage,
+    VulnStatusUpdateRequest,
 )
 from app.services import vuln_view
 from app.services.queue import enqueue_vuln_scan
@@ -216,6 +232,8 @@ async def list_vuln_scan_vulnerabilities(
     scan_id: UUID,
     severity: str | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
+    kev_only: bool = Query(False),
+    hvt_only: bool = Query(False),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     user: CurrentUser = Depends(get_current_user),
@@ -227,6 +245,8 @@ async def list_vuln_scan_vulnerabilities(
         scan_id,
         severity=severity,
         status=status_filter,
+        kev_only=kev_only,
+        hvt_only=hvt_only,
         offset=offset,
         limit=limit,
     )
@@ -237,6 +257,8 @@ async def list_vuln_scan_vulnerabilities(
             title=r.title,
             severity=r.severity,
             cvss_v3=r.cvss_v3,
+            epss=r.epss,
+            risk_score=r.risk_score,
             cve_ids=r.cve_ids,
             cwe_ids=r.cwe_ids,
             status=r.status,
@@ -259,6 +281,8 @@ def _vuln_row_to_out(r) -> VulnOut:
         title=r.title,
         severity=r.severity,
         cvss_v3=r.cvss_v3,
+        epss=getattr(r, "epss", None),
+        risk_score=getattr(r, "risk_score", None),
         cve_ids=r.cve_ids,
         cwe_ids=r.cwe_ids,
         status=r.status,
@@ -287,3 +311,150 @@ async def get_vuln_diff(
         fixed=[_vuln_row_to_out(r) for r in data["fixed"]],
         has_prior=data["has_prior"],
     )
+
+
+@router.get("/{scan_id}/by-service", response_model=ByServiceResponse)
+async def get_vulns_by_service(
+    scan_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ByServiceResponse:
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    rows_data = await vuln_view.build_by_service(db, scan_id)
+    rows = [ByServiceRow(**r) for r in rows_data]
+    return ByServiceResponse(rows=rows)
+
+
+@router.get("/{scan_id}/by-technology", response_model=ByTechResponse)
+async def get_vulns_by_technology(
+    scan_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ByTechResponse:
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    rows_data = await vuln_view.build_by_technology(db, scan_id)
+    rows = [ByTechRow(**r) for r in rows_data]
+    return ByTechResponse(rows=rows)
+
+
+@router.get("/{scan_id}/endpoints", response_model=EndpointsPage)
+async def list_scan_endpoints(
+    scan_id: UUID,
+    is_login: bool | None = Query(None),
+    is_admin: bool | None = Query(None),
+    is_api: bool | None = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EndpointsPage:
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    total, endpoints = await vuln_view.build_endpoint_rows(
+        db, scan_id,
+        is_login=is_login,
+        is_admin=is_admin,
+        is_api=is_api,
+        offset=offset,
+        limit=limit,
+    )
+    items = [
+        EndpointRow(
+            id=ep.id,
+            url=ep.url,
+            path=ep.path,
+            method=ep.method,
+            status_code=ep.status_code,
+            content_type=ep.content_type,
+            title=ep.title,
+            is_login=ep.is_login,
+            is_signup=ep.is_signup,
+            is_upload=ep.is_upload,
+            is_api=ep.is_api,
+            is_admin=ep.is_admin,
+            source_tool=ep.source_tool,
+            first_seen=ep.first_seen,
+            last_seen=ep.last_seen,
+        )
+        for ep in endpoints
+    ]
+    return EndpointsPage(total=total, items=items)
+
+
+@router.get("/{scan_id}/endpoints/{endpoint_id}", response_model=EndpointDetail)
+async def get_endpoint_detail(
+    scan_id: UUID,
+    endpoint_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> EndpointDetail:
+    scan, _ = await _get_vuln_scan(db, scan_id, user.org_id)
+    from sqlalchemy import select as _select
+    ep = await db.scalar(
+        _select(Endpoint).where(
+            Endpoint.id == endpoint_id,
+            Endpoint.target_id == scan.target_id,
+        )
+    )
+    if ep is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "endpoint not found")
+    return EndpointDetail(
+        id=ep.id,
+        url=ep.url,
+        path=ep.path,
+        method=ep.method,
+        status_code=ep.status_code,
+        content_type=ep.content_type,
+        title=ep.title,
+        is_login=ep.is_login,
+        is_signup=ep.is_signup,
+        is_upload=ep.is_upload,
+        is_api=ep.is_api,
+        is_admin=ep.is_admin,
+        source_tool=ep.source_tool,
+        first_seen=ep.first_seen,
+        last_seen=ep.last_seen,
+    )
+
+
+@router.get("/{scan_id}/tls", response_model=TlsResponse)
+async def get_tls_view(
+    scan_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TlsResponse:
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    rows_data = await vuln_view.build_tls_view(db, scan_id)
+    rows = [TlsRow(**r) for r in rows_data]
+    return TlsResponse(rows=rows)
+
+
+@router.get("/{scan_id}/hvts", response_model=HvtResponse)
+async def get_hvts(
+    scan_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> HvtResponse:
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    rows_data = await vuln_view.build_hvt_rows(db, scan_id)
+    rows = [
+        HvtRow(
+            asset_id=r["asset_id"],
+            asset_label=r["asset_label"],
+            hvt_score=r["hvt_score"],
+            signals=[HvtSignalItem(**s) for s in r["signals"]],
+        )
+        for r in rows_data
+    ]
+    return HvtResponse(rows=rows)
+
+
+@router.get("/{scan_id}/triage", response_model=TriageResponse)
+async def get_triage(
+    scan_id: UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TriageResponse:
+    await _get_vuln_scan(db, scan_id, user.org_id)
+    data = await vuln_view.build_triage_view(db, scan_id)
+    rows = [TriageVulnRow(**r) for r in data["rows"]]
+    return TriageResponse(rows=rows, total_with_risk_score=data["total_with_risk_score"])
