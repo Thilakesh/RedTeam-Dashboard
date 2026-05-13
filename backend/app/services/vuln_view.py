@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Scan, ScanKind, ScanStatus
 from app.models.asset import Asset
+from app.models.service import Service
+from app.models.technology import Technology
 from app.models.vulnerability import Vulnerability, VulnSeverity
 from app.models.vuln_run_match import VulnRunMatch
 from sqlalchemy import desc
@@ -197,3 +199,112 @@ async def build_vuln_diff(db: AsyncSession, scan_id: UUID) -> dict:
         "fixed": fixed_rows,
         "has_prior": has_prior,
     }
+
+
+async def build_by_service(db: AsyncSession, scan_id: UUID) -> list[dict]:
+    """Vulns for this scan grouped by service, ordered by max risk_score DESC."""
+    rows = (
+        await db.execute(
+            select(
+                Vulnerability.id,
+                Vulnerability.service_id,
+                Vulnerability.severity,
+                Vulnerability.risk_score,
+                Service.canonical_key.label("service_key"),
+                Service.host,
+                Service.port,
+                Service.classification,
+                Service.product,
+                Service.version,
+            )
+            .outerjoin(Service, Service.id == Vulnerability.service_id)
+            .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
+            .where(VulnRunMatch.scan_id == scan_id)
+        )
+    ).all()
+
+    groups: dict[str, dict] = {}
+    for row in rows:
+        key = str(row.service_id) if row.service_id else "none"
+        if key not in groups:
+            groups[key] = {
+                "service_id": row.service_id,
+                "service_key": row.service_key or "No service",
+                "host": row.host,
+                "port": row.port,
+                "classification": (
+                    row.classification.value
+                    if row.classification and hasattr(row.classification, "value")
+                    else str(row.classification or "unknown")
+                ),
+                "product": row.product,
+                "version": row.version,
+                "vuln_count": 0,
+                "severities": {},
+                "max_risk_score": None,
+            }
+        g = groups[key]
+        g["vuln_count"] += 1
+        sev = row.severity.value if hasattr(row.severity, "value") else str(row.severity)
+        g["severities"][sev] = g["severities"].get(sev, 0) + 1
+        if row.risk_score is not None:
+            if g["max_risk_score"] is None or row.risk_score > g["max_risk_score"]:
+                g["max_risk_score"] = row.risk_score
+
+    return sorted(
+        groups.values(),
+        key=lambda x: (x["max_risk_score"] or 0, x["vuln_count"]),
+        reverse=True,
+    )
+
+
+async def build_by_technology(db: AsyncSession, scan_id: UUID) -> list[dict]:
+    """Vulns for this scan grouped by technology, ordered by max risk_score DESC."""
+    rows = (
+        await db.execute(
+            select(
+                Vulnerability.id,
+                Vulnerability.technology_id,
+                Vulnerability.severity,
+                Vulnerability.risk_score,
+                Technology.name.label("tech_name"),
+                Technology.version.label("tech_version"),
+                Technology.cpe,
+                Technology.category,
+            )
+            .outerjoin(Technology, Technology.id == Vulnerability.technology_id)
+            .join(VulnRunMatch, VulnRunMatch.vulnerability_id == Vulnerability.id)
+            .where(
+                VulnRunMatch.scan_id == scan_id,
+                Vulnerability.technology_id.is_not(None),
+            )
+        )
+    ).all()
+
+    groups: dict[str, dict] = {}
+    for row in rows:
+        key = str(row.technology_id)
+        if key not in groups:
+            groups[key] = {
+                "technology_id": row.technology_id,
+                "name": row.tech_name or "Unknown",
+                "version": row.tech_version,
+                "cpe": row.cpe,
+                "category": row.category,
+                "vuln_count": 0,
+                "severities": {},
+                "max_risk_score": None,
+            }
+        g = groups[key]
+        g["vuln_count"] += 1
+        sev = row.severity.value if hasattr(row.severity, "value") else str(row.severity)
+        g["severities"][sev] = g["severities"].get(sev, 0) + 1
+        if row.risk_score is not None:
+            if g["max_risk_score"] is None or row.risk_score > g["max_risk_score"]:
+                g["max_risk_score"] = row.risk_score
+
+    return sorted(
+        groups.values(),
+        key=lambda x: (x["max_risk_score"] or 0, x["vuln_count"]),
+        reverse=True,
+    )
