@@ -5,9 +5,15 @@ from app.models.endpoint import Endpoint
 from app.models.endpoint_observation import EndpointObservation
 from app.models.finding import Finding, FindingSeverity
 from app.models.hvt_signal import HvtSignal, HvtSignalType
+from app.models.investigation_task import (
+    InvestigationFinding,
+    InvestigationTask,
+    InvestigationTaskStatus,
+)
 from app.models.org import Organization, Project, Target
 from app.models.scan import Scan, ScanKind, ScanStage, ScanStatus, StageStatus
 from app.models.service import Service, ServiceClassification
+from app.models.target_workspace import TargetWorkspace, WorkspaceStatus
 from app.models.technology import Technology
 from app.models.tls_observation import TlsObservation
 from app.models.vulnerability import VulnSeverity, VulnStatus, Vulnerability
@@ -26,6 +32,9 @@ __all__ = [
     "FindingSeverity",
     "HvtSignal",
     "HvtSignalType",
+    "InvestigationFinding",
+    "InvestigationTask",
+    "InvestigationTaskStatus",
     "Organization",
     "Project",
     "Scan",
@@ -36,6 +45,7 @@ __all__ = [
     "ServiceClassification",
     "StageStatus",
     "Target",
+    "TargetWorkspace",
     "Technology",
     "TlsObservation",
     "User",
@@ -44,4 +54,5 @@ __all__ = [
     "VulnSeverity",
     "VulnStatus",
     "Vulnerability",
+    "WorkspaceStatus",
 ]

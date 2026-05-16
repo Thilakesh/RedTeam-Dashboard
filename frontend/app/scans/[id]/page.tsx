@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, Clock, Download, Globe, Share2 } from "lucide-react";
+import { Calendar, Clock, Crosshair, Download, Globe, Share2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,14 @@ import { TechnologiesTab } from "@/components/tabs/TechnologiesTab";
 import { PortsTab } from "@/components/tabs/PortsTab";
 import { RisksTab } from "@/components/tabs/RisksTab";
 import { SubdomainsTable } from "@/components/SubdomainsTable";
-import { api, sseUrl, type ScanDetail, type ScanOverview, type VulnScanOut } from "@/lib/api";
+import {
+  api,
+  createWorkspace,
+  sseUrl,
+  type ScanDetail,
+  type ScanOverview,
+  type VulnScanOut,
+} from "@/lib/api";
 
 const SSE_EVENTS = [
   "stage.started",
@@ -42,6 +49,7 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
   const defaultTab = rawTab && VALID_TABS.includes(rawTab) ? rawTab : "subdomains";
 
   const [vulnLaunching, setVulnLaunching] = useState(false);
+  const [wsLaunching, setWsLaunching] = useState(false);
 
   const scan = useQuery({
     queryKey: ["scan", params.id],
@@ -151,6 +159,30 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
               ) : null}
               Run Vulnerability Analysis
+            </Button>
+          )}
+          {s.status === "completed" && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={wsLaunching}
+              onClick={async () => {
+                setWsLaunching(true);
+                try {
+                  const ws = await createWorkspace(params.id);
+                  router.push(`/targets/${ws.target_id}/workspace`);
+                } catch (err) {
+                  console.error("Failed to open target workspace:", err);
+                  setWsLaunching(false);
+                }
+              }}
+            >
+              {wsLaunching ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Crosshair className="h-4 w-4" />
+              )}
+              Target Investigation
             </Button>
           )}
           <Button variant="outline" size="sm">

@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import {
   Bell,
   ChevronRight,
+  Crosshair,
   FileBarChart2,
   LayoutDashboard,
   Moon,
@@ -48,7 +49,12 @@ const NAV: NavItem[] = [
     ],
   },
   { href: "/vuln-scans", label: "Vulnerability Scans", icon: ShieldAlert },
-  { href: "/targets", label: "Targets", icon: Target },
+  {
+    href: "/targets",
+    label: "Target Workspace",
+    icon: Crosshair,
+    children: [{ href: "/targets", label: "Assets" }],
+  },
   { href: "/reports", label: "Reports", icon: FileBarChart2 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -63,8 +69,13 @@ function buildBreadcrumb(pathname: string): string[] {
     return ["Vulnerability Scans", "Detail", "Endpoint"];
   }
   if (pathname.startsWith("/vuln-scans/")) return ["Vulnerability Scans", "Detail"];
-  if (pathname.match(/^\/targets\/[^/]+\/risk$/)) return ["Targets", "Risk View"];
-  if (pathname === "/targets") return ["Targets"];
+  if (pathname.match(/^\/targets\/[^/]+\/workspace\/tasks\/[^/]+$/))
+    return ["Target Workspace", "Detail", "Task"];
+  if (pathname.match(/^\/targets\/[^/]+\/workspace$/))
+    return ["Target Workspace", "Detail"];
+  if (pathname.match(/^\/targets\/[^/]+\/risk$/))
+    return ["Target Workspace", "Risk View"];
+  if (pathname === "/targets") return ["Target Workspace", "Assets"];
   if (pathname === "/reports") return ["Reports"];
   if (pathname === "/settings") return ["Settings"];
   const parts = pathname.split("/").filter(Boolean);

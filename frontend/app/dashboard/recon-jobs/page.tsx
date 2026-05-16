@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Activity, AlertCircle, AlertTriangle, CheckCircle2, Database, ExternalLink, Play, ShieldAlert, Square, Trash2 } from "lucide-react";
+import { Activity, AlertCircle, AlertTriangle, CheckCircle2, Crosshair, Database, ExternalLink, Play, ShieldAlert, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, deleteScan, patchScan, startScan, stopScan, type Scan, type VulnScanOut } from "@/lib/api";
+import { api, createWorkspace, deleteScan, patchScan, startScan, stopScan, type Scan, type VulnScanOut } from "@/lib/api";
 
 const STATUS_CONFIG: Record<
   Scan["status"],
@@ -67,6 +67,7 @@ function ScanTableRow({ scan }: { scan: Scan }) {
     onSuccess: invalidate,
   });
   const [vulnLaunching, setVulnLaunching] = useState(false);
+  const [wsLaunching, setWsLaunching] = useState(false);
 
   const cfg = STATUS_CONFIG[scan.status] ?? { label: scan.status, variant: "default" as const };
   const isActive = scan.status === "running" || scan.status === "created";
@@ -217,6 +218,31 @@ function ScanTableRow({ scan }: { scan: Scan }) {
                 <ShieldAlert className="h-3 w-3" />
               )}
               {vulnLaunching ? "Starting…" : "Run Vuln Analysis"}
+            </Button>
+          )}
+          {scan.status === "completed" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 text-xs"
+              disabled={wsLaunching}
+              onClick={async () => {
+                setWsLaunching(true);
+                try {
+                  const ws = await createWorkspace(scan.id);
+                  router.push(`/targets/${ws.target_id}/workspace`);
+                } catch (err) {
+                  console.error("Failed to open target workspace:", err);
+                  setWsLaunching(false);
+                }
+              }}
+            >
+              {wsLaunching ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Crosshair className="h-3 w-3" />
+              )}
+              {wsLaunching ? "Opening…" : "Target Investigation"}
             </Button>
           )}
         </div>

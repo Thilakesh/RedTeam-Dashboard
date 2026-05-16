@@ -1,62 +1,89 @@
 # Next Steps
 
-## M0–M5 + M-Vuln-1 + M-Vuln-2 — DONE (2026-05-09)
-## UI/Bug Fixes — DONE (2026-05-10)
+## M-TW-1 — Target Workspace scaffold IN PROGRESS (2026-05-16)
 
-Backend + frontend complete through M-Vuln-2. Three uncommitted local changes from 2026-05-10 session.
+**Completed this session (Steps 1-6 + mid-sprint UI changes):**
+- DB schema (3 tables + 2 enums, migration 0012)
+- Models + service layer + API (8 endpoints) + schemas
+- Frontend shell: list page, detail page (Overview/Subdomains/Tasks tabs), CTA buttons, AppShell nav
+- Worker scaffold with placeholder adapter — end-to-end testable
+- TestSSL adapter (`pipeline/investigation/adapters/testssl.py`): JSON parse, classify into `weak_cipher`/`insecure_protocol`/`expired_cert`/`self_signed_cert`/`tls_vuln`/`tls_misconfig` kinds. Emits `TlsObservationRecord` (cert metadata + protocol matrix + weak ciphers + grade). `services/tls.py::insert_tls_observation` persists rows (skips silently if no matching Service for (target, host, port)). Registered in `registry.py` — testssl real, others still placeholder.
+- **Mid-sprint UI changes (2026-05-16, user-driven):**
+  - All 4 tools shown unconditionally; capability gating removed from `available_tools_for_asset` and `validate_tool_for_asset`. Subdomain row no longer hides tools for unknown/unenriched assets.
+  - `build_workspace_subdomain_rows` returns primary IP only per subdomain (from dnsx observation `primary_ip`). IPs column added; `tools_run` aggregates own + primary IP tasks.
+  - Subdomain rows expandable: chevron reveals `ScanTargetPanel` per FQDN + per IP. Each panel has its own HTTP/HTTPS toggle and Tool dropdown. Task params now carry `{protocol, port}`.
+  - Sort dropdown replaced with column-header sort icons (lucide ArrowUpDown / ArrowUp / ArrowDown). Sortable columns: Subdomain, Status, Ports, IPs, Tools Run. Click same header to flip direction.
+
+**Next session (Steps 7-12 of plan at `C:\Users\Admin\.claude\plans\target-workspace-gleaming-clarke.md`):**
+
+Adapters must honor new task params: `params.protocol ∈ {http, https}` + `params.port`. The asset passed in may now be type `subdomain` OR `ipv4` (per primary IP scanning support). Build URL as `{protocol}://{asset_canonical_key}[:{port}]/`.
+
+1. **Step 7 — Nmap Deep adapter**. Wrap `pipeline/adapters/nmap.py` invocation with `-sV -sC --script vuln,banner -p- --top-ports 1000`. Emit `ServiceUpdateRecord`s + `nse_vuln_*` / `service_banner_leak` findings. Ignores protocol — port-based. Worker `_persist_result` needs Service upsert dispatch (see services/assets.py).
+2. **Step 8 — FFUF adapter**. Cmd `ffuf -u {protocol}://{host}/FUZZ -w $INVESTIGATION_WORDLIST -mc 200,204,301,302,307,401,403 -of json`. Parse JSON; emit `EndpointRecord`s + classify via `pipeline/vuln/adapters/endpoint_classifier._classify` for admin/login/api/upload finding kinds. Worker `_persist_result` needs Endpoint upsert dispatch.
+3. **Step 9 — Dirsearch adapter**. Cmd `dirsearch -u {protocol}://{host} -w $INVESTIGATION_WORDLIST --format=json`. Parse; emit Endpoint records + `directory_indexing`/`exposed_dotgit`/`exposed_dotenv`/`backup_file`/`swagger_exposed` findings.
+4. **Step 10 — Per-task result page** `/targets/[id]/workspace/tasks/[task_id]/page.tsx` + 4 `components/workspace/tool-results/{Nmap,Ffuf,Dirsearch,TestSsl}Result.tsx` + `RawOutputCollapsible.tsx`.
+5. **Step 11 — SSE verification + query invalidation polish** with real adapters.
+6. **Step 12 — Dynamic "View X Scan" deep links** on Subdomains tab — query most-recent task per (asset, tool) and link to its detail page.
+
+**Known sharp edges:**
+- Worker `_persist_result` currently only writes findings + tls_observations. Step 7/8/9 require adding Service + Endpoint upsert dispatches (TODOs marked in source).
+- testssl on bare IP without SNI may fail handshake on multi-tenant hosts; accept failure as a finding.
+- Asset type `ipv4` cannot use FQDN-dependent tools cleanly; nmap_deep is the primary IP-friendly tool. Document or grey-out as we learn from real use.
+
+**Worker persistence TODO** (wire after adapters): In `workers/investigation_runner.py::_persist_result`, dispatch `result.services` → `services/assets.upsert_assets` (Service dual-write), `result.endpoints` → new `services/endpoints.upsert_endpoint` helper, `result.tls_observations` → new TLS upsert helper. Currently only findings are persisted.
+
+**Verification gate** (after Step 10): full smoke test in plan §Verification (steps 1-11). Key checks: idempotent workspace creation, conditional dropdown logic, authz negative test, tenant isolation, raw_output collapsible.
+
+---
+
+## M-Vuln-1 through M-Vuln-8 — DONE (2026-05-13)
+
+Backend + frontend complete through M-Vuln-8. 14 commits from this session on `dev_vuln_dash`, not yet pushed.
 
 ## Immediate Actions (User)
 
-1. **Commit + push UI fixes** (3 files modified locally):
+1. **Push branch**:
    ```bash
-   git add frontend/components/AppShell.tsx \
-           frontend/app/dashboard/recon-jobs/page.tsx \
-           backend/app/api/scans.py
-   git commit -m "fix: filter recon-only scans in list API; add vuln nav + run-vuln button in recon jobs"
    git push origin dev_vuln_dash
    ```
 
-2. **Create PR** (gh CLI not installed):
+2. **UI smoke test** — start `docker compose up` in `infra/`, then:
+   - `/vuln-scans/<id>` — all 9 tabs render (empty states OK for TLS/HVTs if no data)
+   - Vulnerabilities tab — KEV-only + HVT-only toggles, Risk column
+   - Overview tab — HVT/public-service cards when data present
+   - `/vuln-scans/<id>/endpoints/<ep_id>` — endpoint detail page
+   - `/targets/<id>/risk` — severity cards + top-risk table
+
+3. **Create PR** (gh CLI not installed):
    https://github.com/Thilakesh/RedTeam-Dashboard/compare/main...dev_vuln_dash
-   Includes M-Vuln-1 schema + M-Vuln-2 pipeline/worker/API/UI + subfinder fix + nav/UX fixes.
+   This PR covers M-Vuln-1 through M-Vuln-8.
 
-## Next Milestone: M-Vuln-3 — Real Nuclei + Safe Stages
+## Next Milestone: M-Vuln-4 — Intrusive Stages
 
-Goal: replace nuclei_safe stub with real binary, add safe-tier vuln stages, ship Diff tab.
+Goal: Add ffuf/nikto/nuclei_intrusive, per-target rate limiting, explicit opt-in UX.
 
-**Stages to add:**
-- `nuclei_safe.py`: real `nuclei` subprocess; rate-limit `-rate-limit 150 -bulk-size 25`; templates dir mounted read-only from host volume (version-pinned, do NOT call `-update-templates` at scan time)
-- `testssl.py`: TLS misconfig (weak ciphers, expired certs, deprecated protocols)
-- `nmap_nse_vuln.py`: safe NSE category (`vuln-cve*`, `http-enum`, `ssl-cert`)
-- `default_creds_matcher.py`: matches services to known default-cred CPEs (NO auth attempts)
-- `katana.py`: passive endpoint discovery
-- `correlator.py`: dedup, evidence merge, exploitability scoring (`risk = w1·CVSS + w2·EPSS + w3·KEV + w4·exposure + ...`)
-- `ai_triage.py`: LLM rationale + remediation, reuses `bounded_completion` + writes `ai_usage` rows
+**Backend:**
+- `ffuf.py` adapter: directory fuzz (NOT enabled by default, intrusive_required=True)
+- `nikto.py` adapter: web server misconfig scan
+- `nuclei_intrusive.py`: high+ severity, tagged rce/sqli/fuzz templates
+- Rate limiter: Redis SETNX `vuln:rate:{target_id}` (per-scan) + `vuln:rate:{org_id}:intrusive` token bucket (default 1 per 10min)
+- `Dockerfile.vuln_worker`: add ffuf + nikto binaries
 
-**Frontend additions:**
-- Diff tab on `/vuln-scans/[id]`: query `VulnRunMatch.state` (new vs seen vs fixed_in_this_run vs regressed)
-- Per-tab grouping: By Service tab, By Technology tab, TLS tab, Endpoints tab (M-Vuln-3.5 if scope creeps)
+**Frontend:**
+- Per-target consent UX on `/vuln-scans` create form: explicit `intrusive` checkbox + warning modal ("These scans send attack traffic")
+- Rate limit feedback: show "intrusive rate limit reached, next scan available in Xm" on 429
 
-**Infra:**
-- Update `Dockerfile.vuln_worker` to bake testssl.sh + katana
-- Mount nuclei templates dir read-only from host volume (don't bake into image)
+## Future: Branch Cleanup Options
 
-## M-Vuln-4 (later) — Intrusive Stages
-- `ffuf` (dir/path fuzz), `nikto`, `nuclei_intrusive` (severity high+, tagged rce/sqli/fuzz)
-- Rate limiter: Redis SETNX with TTL on `vuln:rate:{target_id}`, per-org token bucket on `vuln:rate:{org_id}:intrusive` (default 1 per 10min)
-- Per-target consent UX: explicit intrusive opt-in checkbox + warning modal
-- Tighter ulimit on vuln-worker: `RLIMIT_NOFILE=8192`, `RLIMIT_NPROC=512`
+After M-Vuln-4, consider:
+- Merge `dev_vuln_dash` → main
+- Start `dev_vuln_m4` branch (or continue on `dev_vuln_dash`)
 
 ## Architecture Notes (carry forward)
-- Vuln adapters NEVER write to `assets`/`services`/`technologies` — consume frozen `VulnStageContext` only (CI grep check recommended in M-Vuln-3)
-- Vuln dedup identity: `(target_id, canonical_key)`; `canonical_key` formula:
-  - cpe_matcher: `cve:{cve_id}:{asset_id_or_service_id_or_tech_id}`
-  - nuclei: `nuclei:{template_id}:{asset_id}:{matched_at}`
-  - nmap NSE: `nse:{script_name}:{service_id}`
-- VulnStageContext is detached SQLAlchemy objects (column attrs loaded, no lazy relationships); built once inside SessionLocal, then session closed
-- VulnRunMatch state set per scan: `new` | `seen` | `fixed_in_this_run` (correlator stage marks `fixed` when prior scan had vuln but current doesn't)
-- Vuln scans require parent recon `status=completed` (enforced at API + can defense-in-depth at coordinator)
-- `RLIMIT_AS` still banned for Go binaries
-- arq reload: `docker compose restart worker heavy-worker vuln-worker` after Python module changes
-- All worker services need `volumes: - ../backend:/app` bind mount for dev hot-swap
-- `GET /scans` filters `kind=recon` only — vuln_analysis scans accessed only via `GET /vuln-scans`
+- Vuln adapters NEVER write to `assets`/`services`/`technologies`
+- VulnStageContext is detached SQLAlchemy objects (no lazy relationships)
+- Risk score: 0.30·CVSS + 0.20·EPSS + 0.15·KEV + 0.15·exposure + 0.10·hvt + 0.10·blast_radius
+- `GET /scans` filters `kind=recon` only — vuln scans via `GET /vuln-scans`
+- Endpoint detail scoped by `scan.target_id` — tenant isolation preserved
+- `/targets/{id}/risk` endpoint does full cross-scan rollup (no VulnRunMatch join — reads Vulnerability.target_id directly)
+- Tab state: `?tab=` URL param + VALID_TABS allowlist (now 9 tabs)

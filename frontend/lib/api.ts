@@ -419,3 +419,154 @@ export type TargetRiskView = {
   latest_vuln_scan_status: string | null;
   latest_vuln_scan_created_at: string | null;
 };
+
+// Target Workspace
+export type WorkspaceOut = {
+  id: string;
+  label: string;
+  target_id: string;
+  target_domain: string;
+  parent_scan_id: string | null;
+  status: string;
+  created_at: string;
+};
+
+export type WorkspaceListRow = {
+  id: string;
+  label: string;
+  target_id: string;
+  target_domain: string;
+  parent_scan_id: string | null;
+  asset_count: number;
+  task_count: number;
+  status: string;
+  created_at: string;
+};
+
+export type WorkspaceOverview = {
+  total_subdomains: number;
+  alive_hosts: number;
+  ports_identified: number;
+  running_tasks: number;
+  findings_count: number;
+  hvt_count: number;
+  hvt_signal_summary: Record<string, number>;
+};
+
+export type WorkspaceSubdomainIpRow = {
+  asset_id: string;
+  ip: string;
+};
+
+export type WorkspaceSubdomainRow = {
+  asset_id: string;
+  fqdn: string;
+  alive: boolean;
+  ports: number[];
+  technologies: string[];
+  has_http: boolean;
+  has_https: boolean;
+  available_tools: string[];
+  tools_run: string[];
+  hvt_signals: string[];
+  ips: WorkspaceSubdomainIpRow[];
+};
+
+export type WorkspaceSubdomainsResponse = {
+  rows: WorkspaceSubdomainRow[];
+};
+
+export type InvestigationTaskOut = {
+  id: string;
+  workspace_id: string;
+  asset_id: string;
+  asset_label: string;
+  tool: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  progress_pct: number;
+  duration_s: number | null;
+  raw_output_present: boolean;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type InvestigationTasksResponse = {
+  rows: InvestigationTaskOut[];
+};
+
+export type InvestigationFindingOut = {
+  id: string;
+  task_id: string;
+  asset_id: string;
+  kind: string;
+  severity: string;
+  title: string;
+  description: string | null;
+  evidence: Record<string, unknown>;
+  created_at: string;
+};
+
+export type InvestigationTaskDetailOut = {
+  task: InvestigationTaskOut;
+  findings: InvestigationFindingOut[];
+  raw_output: string | null;
+};
+
+export const TOOL_LABELS: Record<string, string> = {
+  nmap_deep: "Nmap Deep Scan",
+  ffuf: "FFUF",
+  dirsearch: "Dirsearch",
+  testssl: "TestSSL",
+};
+
+export async function createWorkspace(parent_scan_id: string): Promise<WorkspaceOut> {
+  return api<WorkspaceOut>("/target-workspaces", {
+    method: "POST",
+    body: JSON.stringify({ parent_scan_id }),
+  });
+}
+
+export async function listWorkspaces(): Promise<WorkspaceListRow[]> {
+  return api<WorkspaceListRow[]>("/target-workspaces");
+}
+
+export async function getWorkspace(id: string): Promise<WorkspaceOut> {
+  return api<WorkspaceOut>(`/target-workspaces/${id}`);
+}
+
+export async function getWorkspaceOverview(id: string): Promise<WorkspaceOverview> {
+  return api<WorkspaceOverview>(`/target-workspaces/${id}/overview`);
+}
+
+export async function getWorkspaceSubdomains(
+  id: string,
+): Promise<WorkspaceSubdomainsResponse> {
+  return api<WorkspaceSubdomainsResponse>(`/target-workspaces/${id}/subdomains`);
+}
+
+export async function listWorkspaceTasks(
+  id: string,
+): Promise<InvestigationTasksResponse> {
+  return api<InvestigationTasksResponse>(`/target-workspaces/${id}/tasks`);
+}
+
+export async function createInvestigationTask(
+  workspace_id: string,
+  body: { asset_id: string; tool: string; params?: Record<string, unknown> },
+): Promise<InvestigationTaskOut> {
+  return api<InvestigationTaskOut>(`/target-workspaces/${workspace_id}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getInvestigationTask(
+  workspace_id: string,
+  task_id: string,
+): Promise<InvestigationTaskDetailOut> {
+  return api<InvestigationTaskDetailOut>(
+    `/target-workspaces/${workspace_id}/tasks/${task_id}`,
+  );
+}

@@ -239,11 +239,24 @@ Vuln scans require parent recon `status=completed` (enforced at API). They consu
   CTA on completed scans: "Run Vulnerability Analysis" → POST /vuln-scans → /vuln-scans/{new_id}
 /vuln-scans → vuln scan list page (4s polling on running) (M-Vuln-2)
               accessible via sidebar nav "Vulnerability Scans" ← added 2026-05-10
-/vuln-scans/[id] → vuln scan detail (M-Vuln-2)
-  URL tab: ?tab= (VALID_TABS: overview|vulnerabilities)
-  tabs: Overview (severity counts + KEV/CVE summary) | Vulnerabilities (paginated table, severity/status filters, inline status PATCH)
+/vuln-scans/[id] → vuln scan detail (M-Vuln-2, extended M-Vuln-8)
+  URL tab: ?tab= (VALID_TABS: overview|vulnerabilities|by-service|by-tech|endpoints|tls|hvts|triage|diff)
+  tabs:
+    Overview — severity cards + KEV/CVE summary + HVT count card + public services card + top-3 risk vulns
+    Vulnerabilities — paginated table, severity/status/kev-only/hvt-only filters, Risk column, inline status PATCH
+    By Service — vuln grouped by service (host:port/proto), severity breakdown badges
+    By Tech — vuln grouped by technology, table with CPE/category/max-risk
+    Endpoints — paginated endpoint table, flag filters (all/admin/login/api/upload), links to endpoint detail
+    TLS — per-service TLS observations, cert expiry, grade, deprecated protocols, weak ciphers
+    HVTs — high-value target signals grouped by asset, HVT score, signal type badges
+    Triage — top-20 by risk_score with CVSS/EPSS/KEV, description, remediation
+    Diff — new/seen/fixed_in_this_run sections (VulnRunMatch.state)
   SSE subscription on Redis channel scan:{id} while running
-  Diff tab planned for M-Vuln-3 (uses VulnRunMatch.state)
+/vuln-scans/[id]/endpoints/[endpoint_id] → endpoint detail page (M-Vuln-8)
+  Shows: url, method, status_code, content_type, source_tool, flags (admin/login/api/upload/signup), timestamps
+  Back link to ?tab=endpoints
+/targets/[id]/risk → cross-scan target risk rollup (M-Vuln-8)
+  Shows: open vuln severity cards, HVT signal summary, endpoint count, top-10 vulns by risk_score, latest vuln scan link
 /targets → target management
 ```
 
