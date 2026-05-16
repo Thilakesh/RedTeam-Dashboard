@@ -137,6 +137,22 @@ services:
       - ../backend:/app
     restart: unless-stopped
 
+  investigation-worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.investigation_worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app
+    restart: unless-stopped
+
   frontend:
     image: node:20-alpine
     working_dir: /app

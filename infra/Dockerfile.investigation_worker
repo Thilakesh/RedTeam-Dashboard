@@ -1,0 +1,55 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libpq-dev curl ca-certificates unzip git \
+        bsdmainutils dnsutils procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# nmap — deep service/version + NSE scripts for Nmap Deep Scan tool.
+RUN apt-get update && apt-get install -y --no-install-recommends nmap \
+    && rm -rf /var/lib/apt/lists/* \
+    && nmap --version | head -1
+
+# ffuf — directory/parameter fuzzer. Real adapter wires in Step 8.
+ARG FFUF_VERSION=2.1.0
+RUN curl -fsSL -o /tmp/ffuf.tar.gz \
+        "https://github.com/ffuf/ffuf/releases/download/v${FFUF_VERSION}/ffuf_${FFUF_VERSION}_linux_amd64.tar.gz" \
+    && tar -xzf /tmp/ffuf.tar.gz -C /usr/local/bin/ ffuf \
+    && rm /tmp/ffuf.tar.gz \
+    && chmod +x /usr/local/bin/ffuf \
+    && ffuf -V 2>&1 | head -1 || true
+
+# dirsearch — directory bruteforcer. Real adapter wires in Step 9.
+ARG DIRSEARCH_VERSION=0.4.3
+RUN git clone --depth 1 --branch v${DIRSEARCH_VERSION} \
+        https://github.com/maurosoria/dirsearch.git /opt/dirsearch \
+    && ln -s /opt/dirsearch/dirsearch.py /usr/local/bin/dirsearch \
+    && chmod +x /opt/dirsearch/dirsearch.py \
+    && python3 -m pip install --no-cache-dir -r /opt/dirsearch/requirements.txt || true
+
+# testssl.sh — TLS misconfig scanner. Real adapter wires in Step 6.
+ARG TESTSSL_VERSION=3.2
+RUN git clone --depth 1 --branch ${TESTSSL_VERSION} \
+        https://github.com/drwetter/testssl.sh.git /opt/testssl.sh \
+    && ln -s /opt/testssl.sh/testssl.sh /usr/local/bin/testssl.sh \
+    && testssl.sh --version 2>&1 | head -1 || true
+
+# Common wordlist for ffuf/dirsearch (~4k entries — fast enough for analyst loops).
+RUN mkdir -p /wordlists \
+    && curl -fsSL -o /wordlists/common.txt \
+        "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt"
+
+ENV INVESTIGATION_WORDLIST=/wordlists/common.txt
+
+COPY backend/pyproject.toml ./pyproject.toml
+RUN pip install --upgrade pip && pip install .
+
+COPY backend/ ./
+
+CMD ["arq", "app.workers.investigation_runner.InvestigationWorkerSettings"]
