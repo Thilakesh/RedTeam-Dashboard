@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shutil
 import tempfile
 from datetime import datetime
@@ -26,6 +27,12 @@ from app.pipeline.investigation.stage import (
     InvestigationResult,
     TaskContext,
     TlsObservationRecord,
+)
+from app.services.cipher_strength import (
+    cipher_recommendation,
+    classify_cipher,
+    is_secure_protocol,
+    protocol_recommendation,
 )
 
 log = logging.getLogger(__name__)
@@ -80,6 +87,196 @@ def _classify(fid: str, finding_text: str, cve_ids: list[str]) -> str:
     if any(c.lower() in fid.lower() for c in ("cipher", "rc4", "3des", "null", "export")):
         return "weak_cipher"
     return "tls_misconfig"
+
+
+_PROTOCOL_LABEL = {
+    "SSLv2": "SSL 2.0",
+    "SSLv3": "SSL 3.0",
+    "TLS1": "TLS 1.0",
+    "TLS1_1": "TLS 1.1",
+    "TLS1_2": "TLS 1.2",
+    "TLS1_3": "TLS 1.3",
+}
+
+
+def _emit_protocol_findings(host_port: str, raw: list[dict]) -> list[FindingRecord]:
+    """One FindingRecord per protocol version testssl probed."""
+    out: list[FindingRecord] = []
+    for f in raw:
+        fid = f.get("id", "")
+        if fid not in _PROTOCOL_KEY_IDS:
+            continue
+        finding_text = (f.get("finding") or "").strip()
+        low = finding_text.lower()
+        offered = "offered" in low
+        deprecated_offered = offered and "deprecated" in low
+        # "not offered" reads as not enabled; mark as disabled.
+        enabled = offered and "not offered" not in low
+        secure = is_secure_protocol(fid) and enabled
+        label = _PROTOCOL_LABEL.get(fid, fid)
+        status = (
+            "enabled-insecure"
+            if enabled and not is_secure_protocol(fid)
+            else "enabled"
+            if enabled
+            else "disabled"
+        )
+        sev = (
+            "high"
+            if enabled and not is_secure_protocol(fid)
+            else "info"
+        )
+        out.append(
+            FindingRecord(
+                kind="protocol_info",
+                severity=sev,
+                title=f"{label} · {status}",
+                description=finding_text[:1000],
+                evidence={
+                    "host": host_port,
+                    "protocol": label,
+                    "protocol_id": fid,
+                    "enabled": enabled,
+                    "secure": secure,
+                    "deprecated": deprecated_offered,
+                    "raw_finding": finding_text,
+                },
+            )
+        )
+    return out
+
+
+_CIPHER_LINE_RE = re.compile(
+    r"\b(?P<name>[A-Za-z0-9_\-]+(?:_[A-Z][A-Z0-9_]+)+)"
+)
+
+
+def _extract_cipher_name(finding_text: str) -> str | None:
+    """Pull the canonical cipher name out of a testssl 'finding' string.
+
+    testssl emits lines like:
+      'TLS_RSA_WITH_AES_128_GCM_SHA256, no PFS'
+      'ECDHE-RSA-AES256-GCM-SHA384 (0xc030) ECDH 256 ...'
+    """
+    text = finding_text.strip()
+    if not text:
+        return None
+    # Prefer the first token if it looks like a cipher (uppercase + underscores
+    # or hyphens, no spaces).
+    first = text.split()[0].rstrip(",")
+    if "_" in first or "-" in first:
+        if any(ch.isalpha() for ch in first):
+            return first
+    m = _CIPHER_LINE_RE.search(text)
+    return m.group("name") if m else None
+
+
+def _emit_cipher_findings(host_port: str, raw: list[dict]) -> list[FindingRecord]:
+    """One FindingRecord per offered cipher with strength classification."""
+    out: list[FindingRecord] = []
+    seen: set[tuple[str, str]] = set()
+    for f in raw:
+        fid = f.get("id", "")
+        low_fid = fid.lower()
+        if not (low_fid.startswith("cipher_") or low_fid.startswith("cipher-")):
+            continue
+        # cipherorder / cipher_negotiated belong to general findings, not the
+        # per-cipher list.
+        if low_fid.startswith("cipherorder"):
+            continue
+        finding_text = (f.get("finding") or "").strip()
+        if not finding_text:
+            continue
+        name = _extract_cipher_name(finding_text) or fid
+        # Figure out which protocol version this came from. Newer testssl IDs:
+        # cipher-tls12_xc02f, cipher-tls13_x1303
+        proto = "Unknown"
+        if "tls13" in low_fid:
+            proto = "TLS 1.3"
+        elif "tls12" in low_fid:
+            proto = "TLS 1.2"
+        elif "tls11" in low_fid:
+            proto = "TLS 1.1"
+        elif "tls10" in low_fid or "tls1_" in low_fid:
+            proto = "TLS 1.0"
+        elif "ssl3" in low_fid or "sslv3" in low_fid:
+            proto = "SSL 3.0"
+        key = (name, proto)
+        if key in seen:
+            continue
+        seen.add(key)
+        strength = classify_cipher(name)
+        sev_map = {
+            "recommended": "info",
+            "secure": "info",
+            "weak": "low",
+            "insecure": "high",
+            "unknown": "info",
+        }
+        out.append(
+            FindingRecord(
+                kind="cipher_info",
+                severity=sev_map.get(strength, "info"),
+                title=f"{name} · {strength}",
+                description=finding_text[:1000],
+                evidence={
+                    "host": host_port,
+                    "cipher": name,
+                    "protocol": proto,
+                    "strength": strength,
+                    "id": fid,
+                    "raw_finding": finding_text,
+                },
+            )
+        )
+    return out
+
+
+def _emit_recommendation_findings(
+    host_port: str, findings: list[FindingRecord]
+) -> list[FindingRecord]:
+    """Summarize protocol + cipher posture into recommendation findings."""
+    out: list[FindingRecord] = []
+    proto_findings = [f for f in findings if f.kind == "protocol_info"]
+    cipher_findings = [f for f in findings if f.kind == "cipher_info"]
+
+    if proto_findings:
+        all_secure = all(
+            (not f.evidence.get("enabled")) or f.evidence.get("secure")
+            for f in proto_findings
+        )
+        out.append(
+            FindingRecord(
+                kind="protocol_recommendation",
+                severity="info" if all_secure else "med",
+                title="Protocol recommendation",
+                description=protocol_recommendation(all_secure),
+                evidence={"host": host_port, "all_secure": all_secure},
+            )
+        )
+
+    if cipher_findings:
+        counts: dict[str, int] = {}
+        for c in cipher_findings:
+            s = str(c.evidence.get("strength") or "unknown")
+            counts[s] = counts.get(s, 0) + 1
+        out.append(
+            FindingRecord(
+                kind="cipher_recommendation",
+                severity=(
+                    "high"
+                    if counts.get("insecure", 0) > 0
+                    else "med"
+                    if counts.get("weak", 0) > 0
+                    else "info"
+                ),
+                title="Cipher recommendation",
+                description=cipher_recommendation(counts),
+                evidence={"host": host_port, "strength_counts": counts},
+            )
+        )
+
+    return out
 
 
 def _flatten_testssl_data(data) -> list[dict]:
@@ -288,9 +485,21 @@ class TestSslAdapter:
             )
 
             findings: list[FindingRecord] = []
+            findings.extend(
+                _emit_protocol_findings(host_port, raw_findings)
+            )
+            findings.extend(
+                _emit_cipher_findings(host_port, raw_findings)
+            )
             for f in raw_findings:
                 fid = f.get("id", "")
                 if not fid or fid in _NOISE_IDS:
+                    continue
+                # Skip protocol / cipher entries — emitted separately above with
+                # full classification + strength metadata.
+                if fid in _PROTOCOL_KEY_IDS:
+                    continue
+                if fid.lower().startswith(("cipher_", "cipher-", "cipherorder")):
                     continue
                 sev_raw = str(f.get("severity", "INFO")).upper()
                 severity = _SEVERITY_MAP.get(sev_raw, "info")
@@ -317,6 +526,8 @@ class TestSslAdapter:
                         },
                     )
                 )
+
+            findings.extend(_emit_recommendation_findings(host_port, findings))
 
             return InvestigationResult(
                 findings=findings,

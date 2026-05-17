@@ -8,8 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NmapResult } from "@/components/workspace/tool-results/NmapResult";
-import { FfufResult } from "@/components/workspace/tool-results/FfufResult";
-import { DirsearchResult } from "@/components/workspace/tool-results/DirsearchResult";
+import { EndpointsResult } from "@/components/workspace/tool-results/EndpointsResult";
 import { TestSslResult } from "@/components/workspace/tool-results/TestSslResult";
 import { RawOutputCollapsible } from "@/components/workspace/tool-results/RawOutputCollapsible";
 import {
@@ -147,10 +146,8 @@ function TaskContent({
           </div>
         ) : task.tool === "nmap_deep" ? (
           <NmapResult findings={findings} />
-        ) : task.tool === "ffuf" ? (
-          <FfufResult findings={findings} />
-        ) : task.tool === "dirsearch" ? (
-          <DirsearchResult findings={findings} />
+        ) : task.tool === "ffuf" || task.tool === "dirsearch" ? (
+          <EndpointsResult findings={findings} tool={task.tool} />
         ) : task.tool === "testssl" ? (
           <TestSslResult findings={findings} />
         ) : (

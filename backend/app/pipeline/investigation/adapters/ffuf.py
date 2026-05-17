@@ -45,7 +45,9 @@ log = logging.getLogger(__name__)
 _BINARY = "ffuf"
 _TIMEOUT_SEC = 300
 _RAW_CAP_BYTES = 100_000
-_MATCH_CODES = "200,204,301,302,307,401,403"
+# All major status codes per user spec. 404 intentionally excluded — most
+# wordlist entries return it, would flood the result table with noise.
+_MATCH_CODES = "200,204,301,302,307,308,400,401,403,405,500,502,503"
 _DEFAULT_WORDLIST = os.environ.get(
     "INVESTIGATION_WORDLIST", "/wordlists/common.txt"
 )

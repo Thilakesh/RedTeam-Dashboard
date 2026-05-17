@@ -1,7 +1,11 @@
-"""nmap_deep — per-asset deep nmap scan adapter.
+"""nmap_deep — per-asset intense nmap scan adapter.
 
-Wraps nmap with `-sV -sC --script vuln,banner --top-ports 1000 --open -Pn`
-against a single host (subdomain FQDN or ipv4). Emits:
+Wraps nmap with `-A -T4 -Pn` (intense scan profile) against a single host
+(subdomain FQDN or ipv4). `-A` enables OS detection, version detection, script
+scanning, and traceroute. `-T4` uses faster timing template. `-Pn` skips host
+discovery so cloud hosts behind ICMP filters still scan.
+
+Emits:
 
 - One `ServiceUpdateRecord` per open port (service_name, product, version,
   banner, cpes) — worker dispatches to `services/service_enrichment.upsert_service_enrichment`.
@@ -64,26 +68,22 @@ class NmapDeepAdapter:
         host = ctx.asset_canonical_key
         params = ctx.params or {}
 
-        # Port selection: explicit port wins, else --top-ports 1000.
-        port_args: list[str]
+        # Port selection: explicit port narrows to one; default = nmap's own
+        # top-1000 (implicit with -A intense scan profile).
+        port_args: list[str] = []
         if params.get("port"):
             try:
-                port_arg = str(int(params["port"]))
-                port_args = ["-p", port_arg]
+                port_args = ["-p", str(int(params["port"]))]
             except (TypeError, ValueError):
-                port_args = ["--top-ports", "1000"]
-        else:
-            port_args = ["--top-ports", "1000"]
+                port_args = []
 
         with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
             out_path = Path(f.name)
 
         cmd = [
             binary,
-            "-sV",
-            "-sC",
-            "--script", "vuln,banner",
-            "--open",
+            "-A",
+            "-T4",
             "-Pn",
             *port_args,
             "-oX", str(out_path),
