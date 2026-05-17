@@ -82,6 +82,37 @@ def _classify(fid: str, finding_text: str, cve_ids: list[str]) -> str:
     return "tls_misconfig"
 
 
+def _flatten_testssl_data(data) -> list[dict]:
+    """Normalize testssl output to a flat list of finding dicts.
+
+    testssl supports two JSON output modes:
+      --jsonfile         → flat array of {id, severity, finding, cve, ...}
+      --jsonfile-pretty  → nested {clientProblem*, Invocation, scanResult: [{
+                              targetHost, ip, port, pretest, [other-keyed lists]
+                            }]}
+
+    Adapter prefers --jsonfile; this helper keeps backward compatibility with
+    any --jsonfile-pretty outputs already on disk.
+    """
+    if isinstance(data, list):
+        return [f for f in data if isinstance(f, dict)]
+    if not isinstance(data, dict):
+        return []
+    out: list[dict] = []
+    for v in data.values():
+        if isinstance(v, list):
+            out.extend(f for f in v if isinstance(f, dict) and "id" in f)
+    scan_results = data.get("scanResult") or []
+    if isinstance(scan_results, list):
+        for sr in scan_results:
+            if not isinstance(sr, dict):
+                continue
+            for v in sr.values():
+                if isinstance(v, list):
+                    out.extend(f for f in v if isinstance(f, dict) and "id" in f)
+    return out
+
+
 def _parse_iso_date(value: str | None) -> str | None:
     """testssl emits 'YYYY-MM-DD HH:MM' for cert dates — normalize to ISO."""
     if not value:
@@ -151,7 +182,11 @@ async def _run_testssl(host_port: str, out_path: Path) -> None:
         _BINARY,
         "--quiet",
         "--color", "0",
-        "--jsonfile-pretty", str(out_path),
+        # --jsonfile emits a flat JSON array of finding dicts; --jsonfile-pretty
+        # emits a nested object (clientProblem*, Invocation, scanResult) that
+        # this adapter does NOT walk. Stick to flat array — it's the contract
+        # the parser below assumes.
+        "--jsonfile", str(out_path),
         "--protocols",
         "--server-defaults",
         "--vulnerable",
@@ -244,7 +279,7 @@ class TestSslAdapter:
                     raw_output=raw_text,
                 )
 
-            raw_findings = data if isinstance(data, list) else []
+            raw_findings = _flatten_testssl_data(data)
 
             tls_obs = _extract_tls_observation(
                 host=ctx.asset_canonical_key,
