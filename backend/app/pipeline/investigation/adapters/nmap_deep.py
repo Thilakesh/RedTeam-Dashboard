@@ -66,17 +66,11 @@ class NmapDeepAdapter:
             )
 
         host = ctx.asset_canonical_key
-        params = ctx.params or {}
 
-        # Port selection: explicit port narrows to one; default = nmap's own
-        # top-1000 (implicit with -A intense scan profile).
-        port_args: list[str] = []
-        if params.get("port"):
-            try:
-                port_args = ["-p", str(int(params["port"]))]
-            except (TypeError, ValueError):
-                port_args = []
-
+        # Intense scan, full nmap default port set. params.port is ignored —
+        # restricting to a single port is the wrong tool for an investigation
+        # workflow (use ad-hoc nmap CLI for that). Per user spec:
+        #   nmap -A -T4 <target>
         with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
             out_path = Path(f.name)
 
@@ -85,7 +79,6 @@ class NmapDeepAdapter:
             "-A",
             "-T4",
             "-Pn",
-            *port_args,
             "-oX", str(out_path),
             host,
         ]

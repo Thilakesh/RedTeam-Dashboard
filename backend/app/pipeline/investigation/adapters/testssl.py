@@ -100,12 +100,20 @@ _PROTOCOL_LABEL = {
 
 
 def _emit_protocol_findings(host_port: str, raw: list[dict]) -> list[FindingRecord]:
-    """One FindingRecord per protocol version testssl probed."""
+    """One FindingRecord per protocol version testssl probed.
+
+    testssl emits each protocol id more than once when both --protocols and
+    --server-defaults run; dedupe by protocol_id keeping the first occurrence.
+    """
     out: list[FindingRecord] = []
+    seen_protocols: set[str] = set()
     for f in raw:
         fid = f.get("id", "")
         if fid not in _PROTOCOL_KEY_IDS:
             continue
+        if fid in seen_protocols:
+            continue
+        seen_protocols.add(fid)
         finding_text = (f.get("finding") or "").strip()
         low = finding_text.lower()
         offered = "offered" in low
@@ -387,6 +395,9 @@ async def _run_testssl(host_port: str, out_path: Path) -> None:
         "--protocols",
         "--server-defaults",
         "--vulnerable",
+        # -E / --cipher-per-proto enumerates each cipher offered per protocol
+        # version. Without this flag testssl emits zero cipher_* findings.
+        "-E",
         host_port,
     ]
     proc = await asyncio.create_subprocess_exec(
