@@ -98,9 +98,9 @@ correlator_engine.py: merge_by_cve + enrich_epss_kev + write_risk_scores. servic
 - **Subfinder**: use streaming async for (not `proc.communicate()`), 300s wait_for, `-timeout 30` per-source; kill on timeout returns partial results
 
 ### M-TW-1 — Target Workspace (analyst per-asset investigation)
-⏳ In progress (2026-05-16) — scaffold + TestSSL adapter live; nmap_deep/ffuf/dirsearch still placeholder
+⏳ In progress (2026-05-17) — scaffold + TestSSL + Nmap Deep adapters live; ffuf/dirsearch still placeholder
 
-**Backend (uncommitted on `dev_vuln_dash`):**
+**Backend (on `dev_Tar_workspace`, scaffold pushed; Step 7 pending push):**
 - Migration `0012_target_workspace.py`: 3 tables (`target_workspaces`, `investigation_tasks`, `investigation_findings`) + 2 enums (`workspace_status`, `investigation_task_status`)
 - Models: `TargetWorkspace`, `WorkspaceStatus`, `InvestigationTask`, `InvestigationTaskStatus`, `InvestigationFinding` — registered in `models/__init__.py`
 - Services:
@@ -114,8 +114,10 @@ correlator_engine.py: merge_by_cve + enrich_epss_kev + write_risk_scores. servic
   - `pipeline/investigation/stage.py` — TaskContext, FindingRecord, ServiceUpdateRecord, EndpointRecord, TlsObservationRecord, InvestigationResult, InvestigationAdapter Protocol
   - `pipeline/investigation/registry.py` — ADAPTERS dict (nmap_deep/ffuf/dirsearch = PlaceholderAdapter; testssl = TestSslAdapter)
   - `pipeline/investigation/adapters/testssl.py` — REAL. Subprocess `testssl.sh --quiet --jsonfile-pretty --protocols --server-defaults --vulnerable {fqdn|ip}:{port}`, 600s timeout, parses JSON, classifies into kinds (weak_cipher/insecure_protocol/expired_cert/self_signed_cert/tls_vuln/tls_misconfig). Honors `params.port` (default 443); HTTPS implicit.
-  - `pipeline/investigation/adapters/placeholder.py` — sleeps 1s + emits one INFO finding echoing params
-  - `workers/investigation_runner.py` — authz gate, pub/sub `investigation:{task_id}`, Redis SET `workspace:{ws_id}:tasks` for SSE filter, `_persist_result` dispatches findings + tls_observations (services/endpoints dispatch TODO for nmap/ffuf/dirsearch)
+  - `pipeline/investigation/adapters/nmap_deep.py` — REAL (Step 7, 2026-05-17). Cmd `nmap -sV -sC --script vuln,banner --open -Pn {port_args} -oX {tmp} {host}`. Port args: `-p {params.port}` if explicit, else `--top-ports 1000`. Ignores `params.protocol` (port-based). Timeout 600s. Parses XML, emits `ServiceUpdateRecord` per open port + `FindingRecord` per NSE hit (vuln-category → `nse_vuln_<sid>` graded by VULNERABLE/LIKELY VULNERABLE markers; banner → `service_banner_leak`; other → `nse_<sid>`).
+  - `pipeline/investigation/adapters/placeholder.py` — sleeps 1s + emits one INFO finding echoing params (still used for ffuf/dirsearch)
+  - `services/service_enrichment.py::upsert_service_enrichment` — Service upsert helper for investigation path. Upsert by (target_id, canonical_key); coalesce non-null fields; `cpes` uses `case+cardinality` to avoid wiping prior CPEs.
+  - `workers/investigation_runner.py` — authz gate, pub/sub `investigation:{task_id}`, Redis SET `workspace:{ws_id}:tasks` for SSE filter, `_persist_result` dispatches findings + tls_observations + services (endpoints dispatch TODO for ffuf/dirsearch)
 - Infra: `Dockerfile.investigation_worker` (nmap + ffuf 2.1.0 + dirsearch 0.4.3 + testssl 3.2 + SecLists `/wordlists/common.txt`); compose service `investigation-worker`
 
 **Frontend (uncommitted):**
@@ -132,13 +134,12 @@ correlator_engine.py: merge_by_cve + enrich_epss_kev + write_risk_scores. servic
 - SSE wired on workspace stream invalidates overview/subdomains/tasks queries.
 
 **Pending:**
-- Step 7: Nmap Deep adapter — `-sV -sC --script vuln,banner -p- --top-ports 1000`; emit ServiceUpdateRecord rows + nse_vuln_* / service_banner_leak findings
 - Step 8: FFUF adapter — `ffuf -u {protocol}://{host}/FUZZ -w $INVESTIGATION_WORDLIST -mc 200,204,301,302,307,401,403 -of json`; upsert Endpoint + classify admin/login/api/upload
 - Step 9: Dirsearch adapter — `dirsearch -u {protocol}://{host} -w $INVESTIGATION_WORDLIST --format=json`; upsert Endpoint + detect .git/.env/backup/swagger
 - Step 10: `/targets/[id]/workspace/tasks/[task_id]/page.tsx` per-task result page + 4 tool-result components + RawOutputCollapsible
 - Step 11: SSE verification with real adapters
 - Step 12: Dynamic "View X Scan" deep links to most-recent task per (asset, tool)
-- Worker `_persist_result` wiring for `result.services` (Service upsert) + `result.endpoints` (Endpoint upsert) — needed before step 7/8/9 land
+- Worker `_persist_result` wiring for `result.endpoints` (Endpoint upsert) — needed before step 8/9 land. `result.services` dispatch is done (Step 7).
 
 **Locked design decisions (user, 2026-05-16):**
 1. New `TargetWorkspace` + `InvestigationTask` tables, NOT a ScanKind
@@ -153,4 +154,4 @@ correlator_engine.py: merge_by_cve + enrich_epss_kev + write_risk_scores. servic
 10. **Column-header sort** in Subdomains table (not separate sort dropdown)
 
 ## Current Focus
-M-TW-1 scaffold live with TestSSL real adapter; nmap_deep/ffuf/dirsearch placeholder. Next: Nmap Deep adapter (Step 7) + worker dispatch for Service upsert. Plan file: `C:\Users\Admin\.claude\plans\target-workspace-gleaming-clarke.md`.
+M-TW-1 scaffold live with TestSSL + Nmap Deep real adapters; ffuf/dirsearch placeholder. Next: FFUF adapter (Step 8) + Endpoint upsert dispatch in worker. Plan file: `C:\Users\Admin\.claude\plans\target-workspace-gleaming-clarke.md`.

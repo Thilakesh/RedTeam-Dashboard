@@ -5,12 +5,13 @@ Replace each entry as the adapter is added.
 """
 from __future__ import annotations
 
+from app.pipeline.investigation.adapters.nmap_deep import NmapDeepAdapter
 from app.pipeline.investigation.adapters.placeholder import PlaceholderAdapter
 from app.pipeline.investigation.adapters.testssl import TestSslAdapter
 from app.pipeline.investigation.stage import InvestigationAdapter
 
 ADAPTERS: dict[str, InvestigationAdapter] = {
-    "nmap_deep": PlaceholderAdapter("nmap_deep"),
+    "nmap_deep": NmapDeepAdapter(),
     "ffuf": PlaceholderAdapter("ffuf"),
     "dirsearch": PlaceholderAdapter("dirsearch"),
     "testssl": TestSslAdapter(),

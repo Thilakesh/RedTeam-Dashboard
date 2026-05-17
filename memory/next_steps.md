@@ -1,8 +1,14 @@
 # Next Steps
 
-## M-TW-1 — Target Workspace scaffold IN PROGRESS (2026-05-16)
+## M-TW-1 — Target Workspace scaffold IN PROGRESS (2026-05-17)
 
-**Completed this session (Steps 1-6 + mid-sprint UI changes):**
+**Step 7 done (Nmap Deep adapter, 2026-05-17):**
+- `pipeline/investigation/adapters/nmap_deep.py`: real adapter. Cmd `nmap -sV -sC --script vuln,banner --open -Pn {port_args} -oX {tmp} {host}`. Port args: `-p {params.port}` if explicit, else `--top-ports 1000`. Timeout 600s. Parses XML, emits `ServiceUpdateRecord` per open port (service_name/product/version/banner/cpes) + `FindingRecord` per NSE hit. Script classifier: `vuln`-category → `nse_vuln_<sid>` with severity from VULNERABLE / LIKELY VULNERABLE / NOT VULNERABLE markers (skip on "not vulnerable"); `banner` → `service_banner_leak` low; other scripts → `nse_<sid>` low. Host-level scripts (smb-vuln-*) also captured.
+- `services/service_enrichment.py::upsert_service_enrichment`: new helper. Upserts Service by (target_id, canonical_key="{host}:{port}/{proto}"). On conflict: coalesce non-null fields (preserves prior values when nmap_deep omits). `cpes` uses case+cardinality check to avoid wiping existing CPEs with empty list. Sets `asset_id=NULL` on insert (investigation enrichment doesn't carry Asset row).
+- `workers/investigation_runner._persist_result`: now dispatches `result.services` → `upsert_service_enrichment`. Endpoint dispatch still TODO (Steps 8-9).
+- `pipeline/investigation/registry.py`: `nmap_deep` → `NmapDeepAdapter()` (real); ffuf/dirsearch still placeholder.
+
+**Completed prior session (Steps 1-6 + mid-sprint UI changes):**
 - DB schema (3 tables + 2 enums, migration 0012)
 - Models + service layer + API (8 endpoints) + schemas
 - Frontend shell: list page, detail page (Overview/Subdomains/Tasks tabs), CTA buttons, AppShell nav
@@ -18,19 +24,17 @@
 
 Adapters must honor new task params: `params.protocol ∈ {http, https}` + `params.port`. The asset passed in may now be type `subdomain` OR `ipv4` (per primary IP scanning support). Build URL as `{protocol}://{asset_canonical_key}[:{port}]/`.
 
-1. **Step 7 — Nmap Deep adapter**. Wrap `pipeline/adapters/nmap.py` invocation with `-sV -sC --script vuln,banner -p- --top-ports 1000`. Emit `ServiceUpdateRecord`s + `nse_vuln_*` / `service_banner_leak` findings. Ignores protocol — port-based. Worker `_persist_result` needs Service upsert dispatch (see services/assets.py).
-2. **Step 8 — FFUF adapter**. Cmd `ffuf -u {protocol}://{host}/FUZZ -w $INVESTIGATION_WORDLIST -mc 200,204,301,302,307,401,403 -of json`. Parse JSON; emit `EndpointRecord`s + classify via `pipeline/vuln/adapters/endpoint_classifier._classify` for admin/login/api/upload finding kinds. Worker `_persist_result` needs Endpoint upsert dispatch.
-3. **Step 9 — Dirsearch adapter**. Cmd `dirsearch -u {protocol}://{host} -w $INVESTIGATION_WORDLIST --format=json`. Parse; emit Endpoint records + `directory_indexing`/`exposed_dotgit`/`exposed_dotenv`/`backup_file`/`swagger_exposed` findings.
-4. **Step 10 — Per-task result page** `/targets/[id]/workspace/tasks/[task_id]/page.tsx` + 4 `components/workspace/tool-results/{Nmap,Ffuf,Dirsearch,TestSsl}Result.tsx` + `RawOutputCollapsible.tsx`.
-5. **Step 11 — SSE verification + query invalidation polish** with real adapters.
-6. **Step 12 — Dynamic "View X Scan" deep links** on Subdomains tab — query most-recent task per (asset, tool) and link to its detail page.
+1. **Step 8 — FFUF adapter**. Cmd `ffuf -u {protocol}://{host}/FUZZ -w $INVESTIGATION_WORDLIST -mc 200,204,301,302,307,401,403 -of json`. Parse JSON; emit `EndpointRecord`s + classify via `pipeline/vuln/adapters/endpoint_classifier._classify` for admin/login/api/upload finding kinds. Worker `_persist_result` needs Endpoint upsert dispatch.
+2. **Step 9 — Dirsearch adapter**. Cmd `dirsearch -u {protocol}://{host} -w $INVESTIGATION_WORDLIST --format=json`. Parse; emit Endpoint records + `directory_indexing`/`exposed_dotgit`/`exposed_dotenv`/`backup_file`/`swagger_exposed` findings.
+3. **Step 10 — Per-task result page** `/targets/[id]/workspace/tasks/[task_id]/page.tsx` + 4 `components/workspace/tool-results/{Nmap,Ffuf,Dirsearch,TestSsl}Result.tsx` + `RawOutputCollapsible.tsx`.
+4. **Step 11 — SSE verification + query invalidation polish** with real adapters.
+5. **Step 12 — Dynamic "View X Scan" deep links** on Subdomains tab — query most-recent task per (asset, tool) and link to its detail page.
 
 **Known sharp edges:**
-- Worker `_persist_result` currently only writes findings + tls_observations. Step 7/8/9 require adding Service + Endpoint upsert dispatches (TODOs marked in source).
+- Worker `_persist_result` writes findings + tls_observations + service enrichment. Step 8/9 require adding Endpoint upsert dispatch.
 - testssl on bare IP without SNI may fail handshake on multi-tenant hosts; accept failure as a finding.
 - Asset type `ipv4` cannot use FQDN-dependent tools cleanly; nmap_deep is the primary IP-friendly tool. Document or grey-out as we learn from real use.
-
-**Worker persistence TODO** (wire after adapters): In `workers/investigation_runner.py::_persist_result`, dispatch `result.services` → `services/assets.upsert_assets` (Service dual-write), `result.endpoints` → new `services/endpoints.upsert_endpoint` helper, `result.tls_observations` → new TLS upsert helper. Currently only findings are persisted.
+- nmap_deep with `--top-ports 1000` + NSE scripts on a slow host may exhaust 600s timeout. Analyst can pass `params.port=N` for a single-port scan.
 
 **Verification gate** (after Step 10): full smoke test in plan §Verification (steps 1-11). Key checks: idempotent workspace creation, conditional dropdown logic, authz negative test, tenant isolation, raw_output collapsible.
 
