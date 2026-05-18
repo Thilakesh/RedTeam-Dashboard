@@ -1,5 +1,6 @@
 from app.models.asset import Asset, AssetObservation
 from app.models.ai_usage import AiUsage
+from app.models.auth import AuditLog, BlacklistedJti, RefreshSession, UserFeature
 from app.models.cve_intel import CveIntel
 from app.models.endpoint import Endpoint
 from app.models.endpoint_observation import EndpointObservation
@@ -19,12 +20,14 @@ from app.models.tls_observation import TlsObservation
 from app.models.vulnerability import VulnSeverity, VulnStatus, Vulnerability
 from app.models.vuln_evidence import VulnEvidence
 from app.models.vuln_run_match import VulnRunMatch
-from app.models.user import User
+from app.models.user import User, UserRole
 
 __all__ = [
     "AiUsage",
     "Asset",
     "AssetObservation",
+    "AuditLog",
+    "BlacklistedJti",
     "CveIntel",
     "Endpoint",
     "EndpointObservation",
@@ -37,6 +40,7 @@ __all__ = [
     "InvestigationTaskStatus",
     "Organization",
     "Project",
+    "RefreshSession",
     "Scan",
     "ScanKind",
     "ScanStage",
@@ -49,6 +53,8 @@ __all__ = [
     "Technology",
     "TlsObservation",
     "User",
+    "UserFeature",
+    "UserRole",
     "VulnEvidence",
     "VulnRunMatch",
     "VulnSeverity",

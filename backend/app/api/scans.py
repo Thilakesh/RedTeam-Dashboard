@@ -57,14 +57,18 @@ def _to_scan_out(scan: Scan, domain: str, authz_verified: bool = False) -> ScanO
 
 
 async def _get_scan_and_domain(
-    db: AsyncSession, scan_id: UUID, org_id: UUID
+    db: AsyncSession, scan_id: UUID, user: CurrentUser
 ) -> tuple[Scan, str, bool]:
-    """Returns (scan, domain, target_authz_verified)."""
+    """Returns (scan, domain, target_authz_verified). Analyst sees only own scans."""
     row = (
         await db.execute(
             select(Scan, Target.domain, Target.authorization_verified_at)
             .join(Target, Target.id == Scan.target_id)
-            .where(Scan.id == scan_id, Scan.org_id == org_id)
+            .where(
+                Scan.id == scan_id,
+                Scan.org_id == user.org_id,
+                user.scan_filter(Scan.created_by),
+            )
         )
     ).first()
     if row is None:
@@ -89,7 +93,13 @@ async def create_scan(
         await db.flush()
 
     initial_status = ScanStatus.created if req.autostart else ScanStatus.queued
-    scan = Scan(target_id=target.id, org_id=user.org_id, profile=req.profile, status=initial_status)
+    scan = Scan(
+        target_id=target.id,
+        org_id=user.org_id,
+        created_by=user.id,
+        profile=req.profile,
+        status=initial_status,
+    )
     db.add(scan)
     await db.commit()
     await db.refresh(scan)
@@ -109,7 +119,11 @@ async def list_scans(
         await db.execute(
             select(Scan, Target.domain, Target.authorization_verified_at)
             .join(Target, Target.id == Scan.target_id)
-            .where(Scan.org_id == user.org_id, Scan.kind == ScanKind.recon)
+            .where(
+                Scan.org_id == user.org_id,
+                Scan.kind == ScanKind.recon,
+                user.scan_filter(Scan.created_by),
+            )
             .order_by(desc(Scan.created_at))
             .limit(100)
         )
@@ -123,7 +137,7 @@ async def start_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
-    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user.org_id)
+    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user)
     if scan.status != ScanStatus.queued:
         raise HTTPException(status.HTTP_409_CONFLICT, "Scan is not in queued state")
     scan.status = ScanStatus.created
@@ -138,7 +152,7 @@ async def stop_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
-    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user.org_id)
+    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user)
     if scan.status not in (ScanStatus.created, ScanStatus.running):
         raise HTTPException(status.HTTP_409_CONFLICT, "Scan is not running")
     scan.status = ScanStatus.stopped
@@ -162,7 +176,7 @@ async def update_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
-    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user.org_id)
+    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user)
     if scan.status != ScanStatus.queued:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only queued scans can be edited")
     scan.profile = req.profile
@@ -176,7 +190,7 @@ async def delete_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    scan, _, _authz = await _get_scan_and_domain(db, scan_id, user.org_id)
+    scan, _, _authz = await _get_scan_and_domain(db, scan_id, user)
     if scan.status != ScanStatus.queued:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only queued scans can be deleted")
     await db.delete(scan)
@@ -192,7 +206,7 @@ async def get_scan(
     scan = await db.scalar(
         select(Scan)
         .options(selectinload(Scan.stages))
-        .where(Scan.id == scan_id, Scan.org_id == user.org_id)
+        .where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
     )
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
@@ -209,7 +223,7 @@ async def list_scan_assets(
     db: AsyncSession = Depends(get_db),
 ) -> list[AssetOut]:
     scan = await db.scalar(
-        select(Scan).where(Scan.id == scan_id, Scan.org_id == user.org_id)
+        select(Scan).where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
     )
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
@@ -226,7 +240,7 @@ async def list_scan_assets(
 
 async def _ensure_scan_visible(db: AsyncSession, scan_id: UUID, user: CurrentUser) -> None:
     exists = await db.scalar(
-        select(Scan.id).where(Scan.id == scan_id, Scan.org_id == user.org_id)
+        select(Scan.id).where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
     )
     if exists is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
@@ -344,7 +358,7 @@ async def stream_scan(
     db: AsyncSession = Depends(get_db),
 ):
     scan = await db.scalar(
-        select(Scan.id).where(Scan.id == scan_id, Scan.org_id == user.org_id)
+        select(Scan.id).where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
     )
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")

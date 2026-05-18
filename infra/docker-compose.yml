@@ -51,7 +51,13 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: dev-secret-change-me
+      JWT_PRIVATE_KEY_PATH: /secrets/jwt/private.pem
+      JWT_PUBLIC_KEY_PATH: /secrets/jwt/public.pem
+      JWT_ACCESS_EXPIRE_MINUTES: "10"
+      JWT_REFRESH_EXPIRE_DAYS: "14"
+      COOKIE_SECURE: "false"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-alpha@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Testing123@}
       CORS_ORIGINS: '["http://localhost:3000"]'
     ports:
       - "8000:8000"
@@ -65,6 +71,7 @@ services:
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - ../backend:/app
+      - jwt_secrets:/secrets/jwt
 
   worker:
     build:
@@ -167,3 +174,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  jwt_secrets:
