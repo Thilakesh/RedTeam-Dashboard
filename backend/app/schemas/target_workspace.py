@@ -44,9 +44,20 @@ class WorkspaceOverview(BaseModel):
     hvt_signal_summary: dict[str, int] = Field(default_factory=dict)
 
 
+class WorkspaceScanEntry(BaseModel):
+    task_id: UUID
+    tool: str
+    status: str
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_s: float | None = None
+
+
 class WorkspaceSubdomainIpRow(BaseModel):
     asset_id: UUID
     ip: str
+    scans: list[WorkspaceScanEntry] = Field(default_factory=list)
 
 
 class WorkspaceSubdomainRow(BaseModel):
@@ -61,6 +72,7 @@ class WorkspaceSubdomainRow(BaseModel):
     tools_run: list[str] = Field(default_factory=list)
     hvt_signals: list[str] = Field(default_factory=list)
     ips: list[WorkspaceSubdomainIpRow] = Field(default_factory=list)
+    scans: list[WorkspaceScanEntry] = Field(default_factory=list)
 
 
 class WorkspaceSubdomainsResponse(BaseModel):

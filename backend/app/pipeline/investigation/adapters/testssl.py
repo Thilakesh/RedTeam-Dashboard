@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shutil
 import tempfile
 from datetime import datetime
@@ -26,6 +27,12 @@ from app.pipeline.investigation.stage import (
     InvestigationResult,
     TaskContext,
     TlsObservationRecord,
+)
+from app.services.cipher_strength import (
+    cipher_recommendation,
+    classify_cipher,
+    is_secure_protocol,
+    protocol_recommendation,
 )
 
 log = logging.getLogger(__name__)
@@ -80,6 +87,259 @@ def _classify(fid: str, finding_text: str, cve_ids: list[str]) -> str:
     if any(c.lower() in fid.lower() for c in ("cipher", "rc4", "3des", "null", "export")):
         return "weak_cipher"
     return "tls_misconfig"
+
+
+_PROTOCOL_LABEL = {
+    "SSLv2": "SSL 2.0",
+    "SSLv3": "SSL 3.0",
+    "TLS1": "TLS 1.0",
+    "TLS1_1": "TLS 1.1",
+    "TLS1_2": "TLS 1.2",
+    "TLS1_3": "TLS 1.3",
+}
+
+
+def _emit_protocol_findings(host_port: str, raw: list[dict]) -> list[FindingRecord]:
+    """One FindingRecord per protocol version testssl probed.
+
+    testssl emits each protocol id more than once when both --protocols and
+    --server-defaults run; dedupe by protocol_id keeping the first occurrence.
+    """
+    out: list[FindingRecord] = []
+    seen_protocols: set[str] = set()
+    for f in raw:
+        fid = f.get("id", "")
+        if fid not in _PROTOCOL_KEY_IDS:
+            continue
+        if fid in seen_protocols:
+            continue
+        seen_protocols.add(fid)
+        finding_text = (f.get("finding") or "").strip()
+        low = finding_text.lower()
+        offered = "offered" in low
+        deprecated_offered = offered and "deprecated" in low
+        # "not offered" reads as not enabled; mark as disabled.
+        enabled = offered and "not offered" not in low
+        secure = is_secure_protocol(fid) and enabled
+        label = _PROTOCOL_LABEL.get(fid, fid)
+        status = (
+            "enabled-insecure"
+            if enabled and not is_secure_protocol(fid)
+            else "enabled"
+            if enabled
+            else "disabled"
+        )
+        sev = (
+            "high"
+            if enabled and not is_secure_protocol(fid)
+            else "info"
+        )
+        out.append(
+            FindingRecord(
+                kind="protocol_info",
+                severity=sev,
+                title=f"{label} · {status}",
+                description=finding_text[:1000],
+                evidence={
+                    "host": host_port,
+                    "protocol": label,
+                    "protocol_id": fid,
+                    "enabled": enabled,
+                    "secure": secure,
+                    "deprecated": deprecated_offered,
+                    "raw_finding": finding_text,
+                },
+            )
+        )
+    return out
+
+
+_IANA_CIPHER_RE = re.compile(r"\bTLS_[A-Z0-9_]+\b")
+
+
+def _extract_cipher_name(finding_text: str) -> str | None:
+    """Pull the canonical cipher name out of a testssl 'finding' string.
+
+    testssl emits lines like:
+      'TLSv1.2   xc02c   ECDHE-ECDSA-AES256-GCM-SHA384  ECDH 256  AESGCM 256  TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384'
+      'TLS_RSA_WITH_AES_128_GCM_SHA256, no PFS'
+      'ECDHE-RSA-AES256-GCM-SHA384 (0xc030) ECDH 256 ...'
+
+    Prefer the IANA name (TLS_*_WITH_* or TLS_AES_*) when present — that's
+    what ciphersuite.info uses for lookups. Fall back to the OpenSSL-style
+    hyphenated name (ECDHE-RSA-…) if no IANA name appears.
+    """
+    text = finding_text.strip()
+    if not text:
+        return None
+    m = _IANA_CIPHER_RE.search(text)
+    if m:
+        return m.group(0)
+    for tok in text.split():
+        tok = tok.rstrip(",")
+        if "-" in tok and any(ch.isalpha() for ch in tok):
+            return tok
+    return None
+
+
+def _emit_cipher_findings(host_port: str, raw: list[dict]) -> list[FindingRecord]:
+    """One FindingRecord per offered cipher with strength classification."""
+    out: list[FindingRecord] = []
+    seen: set[tuple[str, str]] = set()
+    for f in raw:
+        fid = f.get("id", "")
+        low_fid = fid.lower()
+        if not (low_fid.startswith("cipher_") or low_fid.startswith("cipher-")):
+            continue
+        # cipherorder / cipher_negotiated belong to general findings, not the
+        # per-cipher list.
+        if low_fid.startswith("cipherorder"):
+            continue
+        finding_text = (f.get("finding") or "").strip()
+        if not finding_text:
+            continue
+        name = _extract_cipher_name(finding_text) or fid
+        # Figure out which protocol version this came from.
+        # testssl id formats observed:
+        #   cipher-tls1_2_xc02c   (preferred — with underscore between digits)
+        #   cipher-tls1_3_x1303
+        #   cipher-tls12_xc02f    (older format, no underscore between digits)
+        # First try the finding text (most reliable — testssl prints "TLSv1.2"
+        # as the leading token of the description), then fall back to id parsing.
+        proto = "Unknown"
+        finding_lower = finding_text.lower()
+        if "tlsv1.3" in finding_lower or "tls1.3" in finding_lower:
+            proto = "TLS 1.3"
+        elif "tlsv1.2" in finding_lower or "tls1.2" in finding_lower:
+            proto = "TLS 1.2"
+        elif "tlsv1.1" in finding_lower or "tls1.1" in finding_lower:
+            proto = "TLS 1.1"
+        elif "tlsv1.0" in finding_lower or "tls1.0" in finding_lower or "tlsv1 " in finding_lower:
+            proto = "TLS 1.0"
+        elif "sslv3" in finding_lower or "ssl3" in finding_lower:
+            proto = "SSL 3.0"
+        elif "sslv2" in finding_lower or "ssl2" in finding_lower:
+            proto = "SSL 2.0"
+        else:
+            # Fall back to id parsing — order matters: check more-specific
+            # patterns first so tls1_2 doesn't match a tls1 prefix.
+            if "tls1_3" in low_fid or "tls13" in low_fid:
+                proto = "TLS 1.3"
+            elif "tls1_2" in low_fid or "tls12" in low_fid:
+                proto = "TLS 1.2"
+            elif "tls1_1" in low_fid or "tls11" in low_fid:
+                proto = "TLS 1.1"
+            elif "tls1_0" in low_fid or "tls10" in low_fid:
+                proto = "TLS 1.0"
+            elif "ssl3" in low_fid or "sslv3" in low_fid:
+                proto = "SSL 3.0"
+        key = (name, proto)
+        if key in seen:
+            continue
+        seen.add(key)
+        strength = classify_cipher(name)
+        sev_map = {
+            "recommended": "info",
+            "secure": "info",
+            "weak": "low",
+            "insecure": "high",
+            "unknown": "info",
+        }
+        out.append(
+            FindingRecord(
+                kind="cipher_info",
+                severity=sev_map.get(strength, "info"),
+                title=f"{name} · {strength}",
+                description=finding_text[:1000],
+                evidence={
+                    "host": host_port,
+                    "cipher": name,
+                    "protocol": proto,
+                    "strength": strength,
+                    "id": fid,
+                    "raw_finding": finding_text,
+                },
+            )
+        )
+    return out
+
+
+def _emit_recommendation_findings(
+    host_port: str, findings: list[FindingRecord]
+) -> list[FindingRecord]:
+    """Summarize protocol + cipher posture into recommendation findings."""
+    out: list[FindingRecord] = []
+    proto_findings = [f for f in findings if f.kind == "protocol_info"]
+    cipher_findings = [f for f in findings if f.kind == "cipher_info"]
+
+    if proto_findings:
+        all_secure = all(
+            (not f.evidence.get("enabled")) or f.evidence.get("secure")
+            for f in proto_findings
+        )
+        out.append(
+            FindingRecord(
+                kind="protocol_recommendation",
+                severity="info" if all_secure else "med",
+                title="Protocol recommendation",
+                description=protocol_recommendation(all_secure),
+                evidence={"host": host_port, "all_secure": all_secure},
+            )
+        )
+
+    if cipher_findings:
+        counts: dict[str, int] = {}
+        for c in cipher_findings:
+            s = str(c.evidence.get("strength") or "unknown")
+            counts[s] = counts.get(s, 0) + 1
+        out.append(
+            FindingRecord(
+                kind="cipher_recommendation",
+                severity=(
+                    "high"
+                    if counts.get("insecure", 0) > 0
+                    else "med"
+                    if counts.get("weak", 0) > 0
+                    else "info"
+                ),
+                title="Cipher recommendation",
+                description=cipher_recommendation(counts),
+                evidence={"host": host_port, "strength_counts": counts},
+            )
+        )
+
+    return out
+
+
+def _flatten_testssl_data(data) -> list[dict]:
+    """Normalize testssl output to a flat list of finding dicts.
+
+    testssl supports two JSON output modes:
+      --jsonfile         → flat array of {id, severity, finding, cve, ...}
+      --jsonfile-pretty  → nested {clientProblem*, Invocation, scanResult: [{
+                              targetHost, ip, port, pretest, [other-keyed lists]
+                            }]}
+
+    Adapter prefers --jsonfile; this helper keeps backward compatibility with
+    any --jsonfile-pretty outputs already on disk.
+    """
+    if isinstance(data, list):
+        return [f for f in data if isinstance(f, dict)]
+    if not isinstance(data, dict):
+        return []
+    out: list[dict] = []
+    for v in data.values():
+        if isinstance(v, list):
+            out.extend(f for f in v if isinstance(f, dict) and "id" in f)
+    scan_results = data.get("scanResult") or []
+    if isinstance(scan_results, list):
+        for sr in scan_results:
+            if not isinstance(sr, dict):
+                continue
+            for v in sr.values():
+                if isinstance(v, list):
+                    out.extend(f for f in v if isinstance(f, dict) and "id" in f)
+    return out
 
 
 def _parse_iso_date(value: str | None) -> str | None:
@@ -146,15 +406,17 @@ def _extract_tls_observation(
     )
 
 
-async def _run_testssl(host_port: str, out_path: Path) -> None:
+async def _run_testssl(host_port: str, out_path: Path, profile_args: list[str]) -> None:
     cmd = [
         _BINARY,
         "--quiet",
         "--color", "0",
-        "--jsonfile-pretty", str(out_path),
-        "--protocols",
-        "--server-defaults",
-        "--vulnerable",
+        # --jsonfile emits a flat JSON array of finding dicts; --jsonfile-pretty
+        # emits a nested object (clientProblem*, Invocation, scanResult) that
+        # this adapter does NOT walk. Stick to flat array — it's the contract
+        # the parser below assumes.
+        "--jsonfile", str(out_path),
+        *profile_args,
         host_port,
     ]
     proc = await asyncio.create_subprocess_exec(
@@ -193,15 +455,25 @@ class TestSslAdapter:
                 raw_output="",
             )
 
+        from app.services.scan_profiles import resolve_args
+
         port = int(ctx.params.get("port") or _DEFAULT_PORT)
         host_port = f"{ctx.asset_canonical_key}:{port}"
+        profile_args = resolve_args("testssl", ctx.params or {})
+        if not profile_args:
+            profile_args = [
+                "--protocols",
+                "--server-defaults",
+                "--vulnerable",
+                "-E",
+            ]
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
             out_path = Path(tf.name)
 
         try:
             try:
-                await _run_testssl(host_port, out_path)
+                await _run_testssl(host_port, out_path, profile_args)
             except asyncio.TimeoutError:
                 return InvestigationResult(
                     findings=[
@@ -244,7 +516,7 @@ class TestSslAdapter:
                     raw_output=raw_text,
                 )
 
-            raw_findings = data if isinstance(data, list) else []
+            raw_findings = _flatten_testssl_data(data)
 
             tls_obs = _extract_tls_observation(
                 host=ctx.asset_canonical_key,
@@ -253,9 +525,21 @@ class TestSslAdapter:
             )
 
             findings: list[FindingRecord] = []
+            findings.extend(
+                _emit_protocol_findings(host_port, raw_findings)
+            )
+            findings.extend(
+                _emit_cipher_findings(host_port, raw_findings)
+            )
             for f in raw_findings:
                 fid = f.get("id", "")
                 if not fid or fid in _NOISE_IDS:
+                    continue
+                # Skip protocol / cipher entries — emitted separately above with
+                # full classification + strength metadata.
+                if fid in _PROTOCOL_KEY_IDS:
+                    continue
+                if fid.lower().startswith(("cipher_", "cipher-", "cipherorder")):
                     continue
                 sev_raw = str(f.get("severity", "INFO")).upper()
                 severity = _SEVERITY_MAP.get(sev_raw, "info")
@@ -282,6 +566,8 @@ class TestSslAdapter:
                         },
                     )
                 )
+
+            findings.extend(_emit_recommendation_findings(host_port, findings))
 
             return InvestigationResult(
                 findings=findings,

@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { ScansDropdown } from "@/components/workspace/ScansDropdown";
+import { ScanConfigurationCard } from "@/components/workspace/ScanConfigurationCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -594,57 +596,27 @@ function SubdomainRow({
           {row.ips.length ? row.ips.map((i) => i.ip).join(", ") : "—"}
         </td>
         <td className="px-4 py-3">
-          {row.tools_run.length === 0 ? (
-            <span className="text-xs text-muted-foreground">—</span>
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {row.tools_run.map((t) => (
-                <Badge key={t} variant="default" className="text-xxs">
-                  {TOOL_LABELS[t] ?? t}
-                </Badge>
-              ))}
-            </div>
-          )}
+          <ScansDropdown
+            fqdn={row.fqdn}
+            domainScans={row.scans ?? []}
+            ipRows={row.ips}
+            targetId={targetId}
+            compact
+          />
         </td>
       </tr>
       {expanded && (
         <tr className="border-b border-border bg-muted/10">
           <td colSpan={7} className="px-4 py-3">
-            <div className="space-y-2">
-              <ScanTargetPanel
-                workspaceId={workspaceId}
-                assetId={row.asset_id}
-                label={row.fqdn}
-                isIp={false}
-                defaultProtocol={defaultProto}
-                onTaskCreated={onTaskCreated}
-              />
-              {row.ips.map((ipRow) => (
-                <ScanTargetPanel
-                  key={ipRow.asset_id}
-                  workspaceId={workspaceId}
-                  assetId={ipRow.asset_id}
-                  label={ipRow.ip}
-                  isIp
-                  defaultProtocol={defaultProto}
-                  onTaskCreated={onTaskCreated}
-                />
-              ))}
-              {row.tools_run.length > 0 && (
-                <div className="pt-1 flex flex-wrap gap-2">
-                  {row.tools_run.map((t) => (
-                    <Link
-                      key={t}
-                      href={`/targets/${targetId}/workspace?tab=tasks`}
-                      className="text-xxs underline text-muted-foreground hover:text-foreground"
-                      title={`View ${TOOL_LABELS[t] ?? t} runs in Run Scan Details`}
-                    >
-                      View {TOOL_LABELS[t] ?? t} results →
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ScanConfigurationCard
+              workspaceId={workspaceId}
+              fqdn={row.fqdn}
+              domainAssetId={row.asset_id}
+              ipRows={row.ips}
+              domainScans={row.scans ?? []}
+              targetId={targetId}
+              onTaskCreated={onTaskCreated}
+            />
           </td>
         </tr>
       )}

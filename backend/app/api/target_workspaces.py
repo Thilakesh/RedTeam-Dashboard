@@ -47,6 +47,18 @@ from app.services import investigation_tasks as task_service
 router = APIRouter(prefix="/target-workspaces", tags=["target-workspaces"])
 
 
+@router.get("/scan-profiles")
+async def get_scan_profiles() -> dict:
+    """Profile catalog used by the Scan Configuration UI.
+
+    Returned shape:
+      { "<tool>": { "binary": str, "default": str,
+                    "profiles": [{id, label, args[], description}] } }
+    """
+    from app.services.scan_profiles import PROFILES
+    return PROFILES
+
+
 async def _get_workspace_for_user(
     workspace_id: UUID, db: AsyncSession, user: CurrentUser
 ) -> tuple[TargetWorkspace, str]:

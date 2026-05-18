@@ -324,29 +324,51 @@ async def build_workspace_subdomain_rows(
         if primary:
             primary_ip_by_asset[asset_id] = primary
 
-    # tools_run aggregation — include tasks run against the subdomain
-    # AND its primary IP asset, so "View Nmap Scan" surfaces results regardless
-    # of whether the analyst ran on the FQDN or on its backing IP.
+    # Full scan history per asset — used by the expandable "Scans (N)" dropdown
+    # in the subdomain row. Domain assets get their own list; IP assets keep a
+    # separate list so analysts can distinguish FQDN vs primary-IP runs.
     all_related_ids: set[UUID] = set(asset_ids)
     for asset_id, ip in primary_ip_by_asset.items():
         related_asset_id = ip_asset_by_ip.get(ip)
         if related_asset_id is not None:
             all_related_ids.add(related_asset_id)
 
-    tools_run_rows = (
+    scan_rows = (
         await db.execute(
-            select(InvestigationTask.asset_id, InvestigationTask.tool)
+            select(
+                InvestigationTask.id,
+                InvestigationTask.asset_id,
+                InvestigationTask.tool,
+                InvestigationTask.status,
+                InvestigationTask.created_at,
+                InvestigationTask.started_at,
+                InvestigationTask.finished_at,
+            )
             .where(
                 InvestigationTask.asset_id.in_(all_related_ids),
                 InvestigationTask.workspace_id == workspace.id,
-                InvestigationTask.status == InvestigationTaskStatus.completed,
             )
-            .distinct()
+            .order_by(InvestigationTask.created_at.asc())
         )
     ).all()
+    scans_by_asset: dict[UUID, list[dict]] = defaultdict(list)
     tools_run_by_asset: dict[UUID, set[str]] = defaultdict(set)
-    for asset_id, tool in tools_run_rows:
-        tools_run_by_asset[asset_id].add(tool)
+    for tid, aid, tool, status, created_at, started_at, finished_at in scan_rows:
+        status_str = status.value if hasattr(status, "value") else str(status)
+        duration_s: float | None = None
+        if started_at and finished_at:
+            duration_s = (finished_at - started_at).total_seconds()
+        scans_by_asset[aid].append({
+            "task_id": tid,
+            "tool": tool,
+            "status": status_str,
+            "created_at": created_at,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_s": duration_s,
+        })
+        if status_str == "completed":
+            tools_run_by_asset[aid].add(tool)
 
     # HVT signals per asset
     hvt_rows = (
@@ -376,10 +398,14 @@ async def build_workspace_subdomain_rows(
         if primary_ip:
             ip_asset_id = ip_asset_by_ip.get(primary_ip)
             if ip_asset_id is not None:
-                ip_rows.append({"asset_id": ip_asset_id, "ip": primary_ip})
+                ip_rows.append({
+                    "asset_id": ip_asset_id,
+                    "ip": primary_ip,
+                    "scans": scans_by_asset.get(ip_asset_id, []),
+                })
                 ip_tools_run = set(tools_run_by_asset.get(ip_asset_id, set()))
 
-        # Subdomain row tools_run = own tools_run ∪ tools_run on its primary IP
+        # tools_run badge = completed tools across own + primary IP
         combined_tools_run = set(tools_run_by_asset.get(asset.id, set())) | ip_tools_run
 
         rows.append({
@@ -394,5 +420,6 @@ async def build_workspace_subdomain_rows(
             "tools_run": sorted(combined_tools_run),
             "hvt_signals": sorted(hvts_by_asset.get(asset.id, set())),
             "ips": ip_rows,
+            "scans": scans_by_asset.get(asset.id, []),
         })
     return rows

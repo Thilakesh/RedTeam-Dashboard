@@ -37,6 +37,8 @@ from app.pipeline.investigation.stage import (
     TaskContext,
 )
 from app.services import investigation_tasks as task_service
+from app.services.endpoint_enrichment import upsert_endpoint_enrichment
+from app.services.service_enrichment import upsert_service_enrichment
 from app.services.tls import insert_tls_observation
 
 settings = get_settings()
@@ -54,10 +56,10 @@ async def _persist_result(
     workspace_id: UUID,
     target_id: UUID,
     asset_id: UUID,
+    tool: str,
     result: InvestigationResult,
 ) -> None:
-    """Write findings + tls observations + raw_output. Service / Endpoint
-    enrichment dispatch lands in Steps 7-9 (nmap_deep / ffuf / dirsearch)."""
+    """Write findings + tls observations + service/endpoint enrichment + raw_output."""
     async with SessionLocal() as db:
         for f in result.findings:
             db.add(
@@ -73,8 +75,16 @@ async def _persist_result(
             )
         for tls in result.tls_observations:
             await insert_tls_observation(db, target_id=target_id, record=tls)
-        # TODO step 7: dispatch result.services -> services.assets upsert.
-        # TODO step 8-9: dispatch result.endpoints -> services.endpoints upsert.
+        for svc in result.services:
+            await upsert_service_enrichment(db, target_id=target_id, record=svc)
+        for ep in result.endpoints:
+            await upsert_endpoint_enrichment(
+                db,
+                target_id=target_id,
+                asset_id=asset_id,
+                source_tool=tool,
+                record=ep,
+            )
         await db.commit()
 
 
@@ -146,6 +156,7 @@ async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
             workspace_id=workspace.id,
             target_id=target.id,
             asset_id=asset.id,
+            tool=task.tool,
             result=result,
         )
 
