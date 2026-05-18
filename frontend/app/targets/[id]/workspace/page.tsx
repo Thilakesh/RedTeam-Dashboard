@@ -627,18 +627,6 @@ function SubdomainRow({
                   onTaskCreated={onTaskCreated}
                 />
               ))}
-              {((row.scans?.length ?? 0) > 0 ||
-                row.ips.some((i) => i.scans.length > 0)) && (
-                <div className="pt-1">
-                  <ScansDropdown
-                    fqdn={row.fqdn}
-                    domainScans={row.scans ?? []}
-                    ipRows={row.ips}
-                    targetId={targetId}
-                    defaultOpen
-                  />
-                </div>
-              )}
             </div>
           </td>
         </tr>

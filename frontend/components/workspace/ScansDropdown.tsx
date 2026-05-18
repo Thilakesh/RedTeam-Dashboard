@@ -2,8 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { History } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   TOOL_LABELS,
   type WorkspaceScanEntry,
@@ -30,11 +37,16 @@ function formatRelative(iso: string): string {
   if (m < 60) return `${m}m ago`;
   const h = Math.round(m / 60);
   if (h < 24) return `${h}h ago`;
-  return d.toLocaleDateString();
+  const days = Math.round(h / 24);
+  return `${days}d ago`;
+}
+
+function formatAbsolute(iso: string): string {
+  return new Date(iso).toLocaleString();
 }
 
 function formatDuration(seconds: number | null): string {
-  if (seconds === null) return "";
+  if (seconds === null) return "—";
   if (seconds < 1) return "<1s";
   if (seconds < 60) return `${seconds.toFixed(0)}s`;
   const m = Math.floor(seconds / 60);
@@ -53,8 +65,12 @@ export function ScansDropdown({
   domainScans,
   ipRows,
   targetId,
+  /**
+   * Kept for compat with existing callsite — when true the modal opens on
+   * mount. Used by the expanded-row inline dropdown variant.
+   */
   defaultOpen = false,
-  compact = false,
+  compact: _compact = false,
 }: {
   fqdn: string;
   domainScans: WorkspaceScanEntry[];
@@ -80,65 +96,74 @@ export function ScansDropdown({
   }
 
   return (
-    <div className={compact ? "text-xs" : "text-sm"}>
+    <>
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          setOpen(true);
         }}
-        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-muted/40"
+        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted/40"
       >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5" />
-        )}
+        <History className="h-3.5 w-3.5" />
         Scans ({total})
       </button>
-      {open && (
-        <div className="mt-1 rounded-md border border-border bg-background shadow-sm p-2 space-y-2 min-w-[280px]">
-          {groups
-            .filter((g) => g.scans.length > 0)
-            .map((g) => (
-              <div key={g.label}>
-                <div className="text-xxs uppercase text-muted-foreground px-1 py-0.5">
-                  {g.label} ({g.scans.length})
-                </div>
-                <ol className="space-y-0.5">
-                  {g.scans.map((s, idx) => (
-                    <li key={s.task_id}>
-                      <Link
-                        href={`/targets/${targetId}/workspace/tasks/${s.task_id}`}
-                        className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/40 text-xs"
-                        title={new Date(s.created_at).toLocaleString()}
-                      >
-                        <span className="font-mono text-muted-foreground w-6 text-right">
-                          #{idx + 1}
-                        </span>
-                        <span className="flex-1 truncate">
-                          {TOOL_LABELS[s.tool] ?? s.tool}
-                        </span>
-                        <Badge
-                          variant={STATUS_VARIANT[s.status]}
-                          className="text-xxs"
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col p-0">
+          <DialogHeader className="border-b border-border px-5 py-4">
+            <DialogTitle>Scan history · {fqdn}</DialogTitle>
+            <DialogDescription>
+              {total} total scan{total === 1 ? "" : "s"} across domain + primary IP.
+              Click any entry to open its result page.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            {groups
+              .filter((g) => g.scans.length > 0)
+              .map((g) => (
+                <section key={g.label}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-sm font-semibold">{g.label}</h3>
+                    <Badge variant="outline">{g.scans.length}</Badge>
+                  </div>
+                  <ol className="rounded-md border border-border divide-y divide-border/60">
+                    {g.scans.map((s, idx) => (
+                      <li key={s.task_id}>
+                        <Link
+                          href={`/targets/${targetId}/workspace/tasks/${s.task_id}`}
+                          className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 text-sm"
+                          onClick={() => setOpen(false)}
                         >
-                          {s.status}
-                        </Badge>
-                        <span className="text-xxs text-muted-foreground tabular-nums">
-                          {formatRelative(s.created_at)}
-                          {s.duration_s !== null
-                            ? ` · ${formatDuration(s.duration_s)}`
-                            : ""}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ))}
-        </div>
-      )}
-    </div>
+                          <span className="font-mono text-xs text-muted-foreground w-8 text-right">
+                            #{idx + 1}
+                          </span>
+                          <span className="flex-1 font-medium truncate">
+                            {TOOL_LABELS[s.tool] ?? s.tool}
+                          </span>
+                          <Badge variant={STATUS_VARIANT[s.status]}>
+                            {s.status}
+                          </Badge>
+                          <span
+                            className="text-xs text-muted-foreground tabular-nums w-20 text-right"
+                            title="Execution duration"
+                          >
+                            {formatDuration(s.duration_s)}
+                          </span>
+                          <span
+                            className="text-xs text-muted-foreground tabular-nums w-24 text-right"
+                            title={formatAbsolute(s.created_at)}
+                          >
+                            {formatRelative(s.created_at)}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
