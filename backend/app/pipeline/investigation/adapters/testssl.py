@@ -154,29 +154,32 @@ def _emit_protocol_findings(host_port: str, raw: list[dict]) -> list[FindingReco
     return out
 
 
-_CIPHER_LINE_RE = re.compile(
-    r"\b(?P<name>[A-Za-z0-9_\-]+(?:_[A-Z][A-Z0-9_]+)+)"
-)
+_IANA_CIPHER_RE = re.compile(r"\bTLS_[A-Z0-9_]+\b")
 
 
 def _extract_cipher_name(finding_text: str) -> str | None:
     """Pull the canonical cipher name out of a testssl 'finding' string.
 
     testssl emits lines like:
+      'TLSv1.2   xc02c   ECDHE-ECDSA-AES256-GCM-SHA384  ECDH 256  AESGCM 256  TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384'
       'TLS_RSA_WITH_AES_128_GCM_SHA256, no PFS'
       'ECDHE-RSA-AES256-GCM-SHA384 (0xc030) ECDH 256 ...'
+
+    Prefer the IANA name (TLS_*_WITH_* or TLS_AES_*) when present — that's
+    what ciphersuite.info uses for lookups. Fall back to the OpenSSL-style
+    hyphenated name (ECDHE-RSA-…) if no IANA name appears.
     """
     text = finding_text.strip()
     if not text:
         return None
-    # Prefer the first token if it looks like a cipher (uppercase + underscores
-    # or hyphens, no spaces).
-    first = text.split()[0].rstrip(",")
-    if "_" in first or "-" in first:
-        if any(ch.isalpha() for ch in first):
-            return first
-    m = _CIPHER_LINE_RE.search(text)
-    return m.group("name") if m else None
+    m = _IANA_CIPHER_RE.search(text)
+    if m:
+        return m.group(0)
+    for tok in text.split():
+        tok = tok.rstrip(",")
+        if "-" in tok and any(ch.isalpha() for ch in tok):
+            return tok
+    return None
 
 
 def _emit_cipher_findings(host_port: str, raw: list[dict]) -> list[FindingRecord]:
@@ -196,19 +199,40 @@ def _emit_cipher_findings(host_port: str, raw: list[dict]) -> list[FindingRecord
         if not finding_text:
             continue
         name = _extract_cipher_name(finding_text) or fid
-        # Figure out which protocol version this came from. Newer testssl IDs:
-        # cipher-tls12_xc02f, cipher-tls13_x1303
+        # Figure out which protocol version this came from.
+        # testssl id formats observed:
+        #   cipher-tls1_2_xc02c   (preferred — with underscore between digits)
+        #   cipher-tls1_3_x1303
+        #   cipher-tls12_xc02f    (older format, no underscore between digits)
+        # First try the finding text (most reliable — testssl prints "TLSv1.2"
+        # as the leading token of the description), then fall back to id parsing.
         proto = "Unknown"
-        if "tls13" in low_fid:
+        finding_lower = finding_text.lower()
+        if "tlsv1.3" in finding_lower or "tls1.3" in finding_lower:
             proto = "TLS 1.3"
-        elif "tls12" in low_fid:
+        elif "tlsv1.2" in finding_lower or "tls1.2" in finding_lower:
             proto = "TLS 1.2"
-        elif "tls11" in low_fid:
+        elif "tlsv1.1" in finding_lower or "tls1.1" in finding_lower:
             proto = "TLS 1.1"
-        elif "tls10" in low_fid or "tls1_" in low_fid:
+        elif "tlsv1.0" in finding_lower or "tls1.0" in finding_lower or "tlsv1 " in finding_lower:
             proto = "TLS 1.0"
-        elif "ssl3" in low_fid or "sslv3" in low_fid:
+        elif "sslv3" in finding_lower or "ssl3" in finding_lower:
             proto = "SSL 3.0"
+        elif "sslv2" in finding_lower or "ssl2" in finding_lower:
+            proto = "SSL 2.0"
+        else:
+            # Fall back to id parsing — order matters: check more-specific
+            # patterns first so tls1_2 doesn't match a tls1 prefix.
+            if "tls1_3" in low_fid or "tls13" in low_fid:
+                proto = "TLS 1.3"
+            elif "tls1_2" in low_fid or "tls12" in low_fid:
+                proto = "TLS 1.2"
+            elif "tls1_1" in low_fid or "tls11" in low_fid:
+                proto = "TLS 1.1"
+            elif "tls1_0" in low_fid or "tls10" in low_fid:
+                proto = "TLS 1.0"
+            elif "ssl3" in low_fid or "sslv3" in low_fid:
+                proto = "SSL 3.0"
         key = (name, proto)
         if key in seen:
             continue
