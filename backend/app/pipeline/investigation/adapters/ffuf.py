@@ -79,6 +79,16 @@ class FfufAdapter:
         host_part = host if port is None else f"{host}:{port}"
         url = f"{protocol}://{host_part}/FUZZ"
 
+        from app.services.scan_profiles import resolve_args
+
+        profile_args = resolve_args("ffuf", ctx.params or {})
+        if not profile_args:
+            profile_args = [
+                "-mc", _MATCH_CODES,
+                "-t", "40",
+                "-timeout", "10",
+            ]
+
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             out_path = Path(f.name)
 
@@ -86,11 +96,9 @@ class FfufAdapter:
             binary,
             "-u", url,
             "-w", wordlist,
-            "-mc", _MATCH_CODES,
+            *profile_args,
             "-of", "json",
             "-o", str(out_path),
-            "-t", "40",
-            "-timeout", "10",
             "-noninteractive",
         ]
 

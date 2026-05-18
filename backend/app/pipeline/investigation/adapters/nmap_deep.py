@@ -65,20 +65,20 @@ class NmapDeepAdapter:
                 raw_output="nmap binary missing",
             )
 
-        host = ctx.asset_canonical_key
+        from app.services.scan_profiles import resolve_args
 
-        # Intense scan, full nmap default port set. params.port is ignored —
-        # restricting to a single port is the wrong tool for an investigation
-        # workflow (use ad-hoc nmap CLI for that). Per user spec:
-        #   nmap -A -T4 <target>
+        host = ctx.asset_canonical_key
+        profile_args = resolve_args("nmap_deep", ctx.params or {})
+        if not profile_args:
+            # Fallback to aggressive default if profile resolution returned nothing
+            profile_args = ["-A", "-T4", "-Pn"]
+
         with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
             out_path = Path(f.name)
 
         cmd = [
             binary,
-            "-A",
-            "-T4",
-            "-Pn",
+            *profile_args,
             "-oX", str(out_path),
             host,
         ]

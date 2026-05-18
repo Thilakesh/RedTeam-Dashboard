@@ -533,6 +533,25 @@ export const TOOL_LABELS: Record<string, string> = {
   testssl: "TestSSL",
 };
 
+export type ScanProfileSpec = {
+  id: string;
+  label: string;
+  args: string[];
+  description: string;
+};
+
+export type ToolProfileBundle = {
+  binary: string;
+  default: string;
+  profiles: ScanProfileSpec[];
+};
+
+export type ScanProfilesCatalog = Record<string, ToolProfileBundle>;
+
+export async function getScanProfiles(): Promise<ScanProfilesCatalog> {
+  return api<ScanProfilesCatalog>("/target-workspaces/scan-profiles");
+}
+
 export async function createWorkspace(parent_scan_id: string): Promise<WorkspaceOut> {
   return api<WorkspaceOut>("/target-workspaces", {
     method: "POST",

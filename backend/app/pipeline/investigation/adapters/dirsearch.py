@@ -88,6 +88,12 @@ class DirsearchAdapter:
         host_part = host if port is None else f"{host}:{port}"
         url = f"{protocol}://{host_part}"
 
+        from app.services.scan_profiles import resolve_args
+
+        profile_args = resolve_args("dirsearch", ctx.params or {})
+        if not profile_args:
+            profile_args = ["-t", "20"]
+
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             out_path = Path(f.name)
 
@@ -99,7 +105,7 @@ class DirsearchAdapter:
             "-o", str(out_path),
             "--quiet-mode",
             "--no-color",
-            "-t", "20",
+            *profile_args,
         ]
 
         raw_stderr = ""

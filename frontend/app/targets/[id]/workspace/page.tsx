@@ -17,6 +17,7 @@ import {
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { ScansDropdown } from "@/components/workspace/ScansDropdown";
+import { ScanConfigurationCard } from "@/components/workspace/ScanConfigurationCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -607,27 +608,15 @@ function SubdomainRow({
       {expanded && (
         <tr className="border-b border-border bg-muted/10">
           <td colSpan={7} className="px-4 py-3">
-            <div className="space-y-2">
-              <ScanTargetPanel
-                workspaceId={workspaceId}
-                assetId={row.asset_id}
-                label={row.fqdn}
-                isIp={false}
-                defaultProtocol={defaultProto}
-                onTaskCreated={onTaskCreated}
-              />
-              {row.ips.map((ipRow) => (
-                <ScanTargetPanel
-                  key={ipRow.asset_id}
-                  workspaceId={workspaceId}
-                  assetId={ipRow.asset_id}
-                  label={ipRow.ip}
-                  isIp
-                  defaultProtocol={defaultProto}
-                  onTaskCreated={onTaskCreated}
-                />
-              ))}
-            </div>
+            <ScanConfigurationCard
+              workspaceId={workspaceId}
+              fqdn={row.fqdn}
+              domainAssetId={row.asset_id}
+              ipRows={row.ips}
+              domainScans={row.scans ?? []}
+              targetId={targetId}
+              onTaskCreated={onTaskCreated}
+            />
           </td>
         </tr>
       )}

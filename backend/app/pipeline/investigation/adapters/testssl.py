@@ -406,7 +406,7 @@ def _extract_tls_observation(
     )
 
 
-async def _run_testssl(host_port: str, out_path: Path) -> None:
+async def _run_testssl(host_port: str, out_path: Path, profile_args: list[str]) -> None:
     cmd = [
         _BINARY,
         "--quiet",
@@ -416,12 +416,7 @@ async def _run_testssl(host_port: str, out_path: Path) -> None:
         # this adapter does NOT walk. Stick to flat array — it's the contract
         # the parser below assumes.
         "--jsonfile", str(out_path),
-        "--protocols",
-        "--server-defaults",
-        "--vulnerable",
-        # -E / --cipher-per-proto enumerates each cipher offered per protocol
-        # version. Without this flag testssl emits zero cipher_* findings.
-        "-E",
+        *profile_args,
         host_port,
     ]
     proc = await asyncio.create_subprocess_exec(
@@ -460,15 +455,25 @@ class TestSslAdapter:
                 raw_output="",
             )
 
+        from app.services.scan_profiles import resolve_args
+
         port = int(ctx.params.get("port") or _DEFAULT_PORT)
         host_port = f"{ctx.asset_canonical_key}:{port}"
+        profile_args = resolve_args("testssl", ctx.params or {})
+        if not profile_args:
+            profile_args = [
+                "--protocols",
+                "--server-defaults",
+                "--vulnerable",
+                "-E",
+            ]
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
             out_path = Path(tf.name)
 
         try:
             try:
-                await _run_testssl(host_port, out_path)
+                await _run_testssl(host_port, out_path, profile_args)
             except asyncio.TimeoutError:
                 return InvestigationResult(
                     findings=[
