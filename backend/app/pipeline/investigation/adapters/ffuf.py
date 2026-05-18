@@ -201,7 +201,11 @@ def _parse_ffuf_json(
             continue
         status = hit.get("status")
         length = hit.get("length")
+        words = hit.get("words")
+        lines = hit.get("lines")
         ctype = hit.get("content-type") or hit.get("contentType")
+        redirect = hit.get("redirectlocation") or hit.get("redirect")
+        duration = hit.get("duration")
         path = urlparse(url).path or "/"
 
         endpoints.append(
@@ -216,6 +220,7 @@ def _parse_ffuf_json(
         )
 
         flags = _classify(path)
+        kind_flags: list[str] = []
         for flag_name, kind in (
             ("is_admin", "admin_panel"),
             ("is_login", "login_form"),
@@ -223,25 +228,39 @@ def _parse_ffuf_json(
             ("is_upload", "upload_form"),
             ("is_signup", "signup_form"),
         ):
-            if not flags.get(flag_name):
-                continue
-            findings.append(
-                FindingRecord(
-                    kind=kind,
-                    severity="med" if flag_name in {"is_admin", "is_upload"} else "low",
-                    title=f"{kind.replace('_', ' ')}: {path}",
-                    description=(
-                        f"ffuf discovered {path} (HTTP {status}) — "
-                        f"classifier flagged {flag_name}."
-                    ),
-                    evidence={
-                        "url": url,
-                        "path": path,
-                        "status": status,
-                        "content_type": ctype,
-                        "content_length": length,
-                    },
-                )
+            if flags.get(flag_name):
+                kind_flags.append(kind)
+
+        # Emit ONE finding per discovered endpoint regardless of classifier hits.
+        # Previously only classifier matches produced findings, so plain 200 OK
+        # paths never showed up in the UI even though they were valid hits.
+        severity = (
+            "med" if any(k in {"admin_panel", "upload_form"} for k in kind_flags)
+            else "low" if kind_flags
+            else "info"
+        )
+        findings.append(
+            FindingRecord(
+                kind="discovered_endpoint",
+                severity=severity,
+                title=f"{status if status is not None else '?'} {path}"[:200],
+                description=(
+                    f"ffuf discovered {url} (HTTP {status})."
+                    + (f" Classifier: {', '.join(kind_flags)}." if kind_flags else "")
+                ),
+                evidence={
+                    "url": url,
+                    "path": path,
+                    "status": status,
+                    "content_type": ctype,
+                    "content_length": length,
+                    "words": words,
+                    "lines": lines,
+                    "redirect": redirect,
+                    "duration_ms": duration,
+                    "flags": kind_flags,
+                },
             )
+        )
 
     return endpoints, findings

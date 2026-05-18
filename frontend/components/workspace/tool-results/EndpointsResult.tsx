@@ -17,6 +17,9 @@ type Row = {
   status: number | null;
   contentType: string | null;
   contentLength: number | null;
+  words: number | null;
+  lines: number | null;
+  redirect: string | null;
   kinds: string[];
 };
 
@@ -35,6 +38,8 @@ const CLASSIFIER_KINDS = [
   "upload_form",
   "signup_form",
 ] as const;
+
+const SKIP_KINDS = new Set(["tool_error", "discovered_endpoint"]);
 
 const STATUS_BUCKETS = [
   { id: "2xx", label: "2xx OK", range: [200, 299] },
@@ -60,10 +65,28 @@ function buildRows(findings: InvestigationFindingOut[]): Row[] {
     const path = String(ev.path ?? "");
     const url = String(ev.url ?? "");
     if (!url || !path) continue;
+
+    // Pull flags from evidence (new adapter shape) OR fall back to finding kind
+    // (old shape — every classifier match was its own finding).
+    const flagsFromEv: string[] = Array.isArray(ev.flags)
+      ? (ev.flags as unknown[]).map(String)
+      : [];
+    const extraKinds = SKIP_KINDS.has(f.kind) ? [] : [f.kind];
+
     const existing = byPath.get(path);
     if (existing) {
-      if (!existing.kinds.includes(f.kind)) existing.kinds.push(f.kind);
+      for (const k of flagsFromEv) if (!existing.kinds.includes(k)) existing.kinds.push(k);
+      for (const k of extraKinds) if (!existing.kinds.includes(k)) existing.kinds.push(k);
+      if (existing.status === null && typeof ev.status === "number") existing.status = ev.status;
+      if (existing.contentLength === null && typeof ev.content_length === "number")
+        existing.contentLength = ev.content_length;
+      if (existing.words === null && typeof ev.words === "number") existing.words = ev.words;
+      if (existing.lines === null && typeof ev.lines === "number") existing.lines = ev.lines;
+      if (!existing.redirect && typeof ev.redirect === "string" && ev.redirect)
+        existing.redirect = ev.redirect;
     } else {
+      const kinds = [...flagsFromEv];
+      for (const k of extraKinds) if (!kinds.includes(k)) kinds.push(k);
       byPath.set(path, {
         path,
         url,
@@ -71,7 +94,11 @@ function buildRows(findings: InvestigationFindingOut[]): Row[] {
         contentType: (ev.content_type as string) ?? null,
         contentLength:
           typeof ev.content_length === "number" ? ev.content_length : null,
-        kinds: [f.kind],
+        words: typeof ev.words === "number" ? ev.words : null,
+        lines: typeof ev.lines === "number" ? ev.lines : null,
+        redirect:
+          typeof ev.redirect === "string" && ev.redirect ? ev.redirect : null,
+        kinds,
       });
     }
   }
@@ -266,6 +293,9 @@ export function EndpointsResult({
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Type</th>
                 <th className="px-3 py-2 text-right">Length</th>
+                <th className="px-3 py-2 text-right">Words</th>
+                <th className="px-3 py-2 text-right">Lines</th>
+                <th className="px-3 py-2 text-left">Redirect</th>
                 <th className="px-3 py-2 text-left">Flags</th>
                 <th className="px-3 py-2 text-right">Action</th>
               </tr>
@@ -300,6 +330,19 @@ export function EndpointsResult({
                     </td>
                     <td className="px-3 py-2 text-right font-mono text-xs">
                       {r.contentLength ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">
+                      {r.words ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">
+                      {r.lines ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[180px]">
+                      {r.redirect ? (
+                        <span title={r.redirect}>{r.redirect}</span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">

@@ -218,6 +218,7 @@ def _parse_dirsearch_json(
         status = hit.get("status")
         length = hit.get("content-length") or hit.get("contentLength")
         ctype = hit.get("content-type") or hit.get("contentType")
+        redirect = hit.get("redirect") or hit.get("redirectlocation")
         path = urlparse(url).path or "/"
 
         endpoints.append(
@@ -231,36 +232,23 @@ def _parse_dirsearch_json(
             )
         )
 
-        evidence = {
-            "url": url,
-            "path": path,
-            "status": status,
-            "content_type": ctype,
-            "content_length": length,
-        }
-
-        # High-signal disclosures
+        # Collect classifier flags for this row
+        kind_flags: list[str] = []
         if _DOTGIT_RE.search(path):
-            findings.append(_finding("exposed_dotgit", "high", path, evidence))
+            kind_flags.append("exposed_dotgit")
         if _DOTENV_RE.search(path):
-            findings.append(_finding("exposed_dotenv", "high", path, evidence))
+            kind_flags.append("exposed_dotenv")
         if _BACKUP_RE.search(path):
-            findings.append(_finding("backup_file", "med", path, evidence))
+            kind_flags.append("backup_file")
         if _SWAGGER_RE.search(path):
-            findings.append(_finding("swagger_exposed", "med", path, evidence))
-
-        # Best-effort directory indexing detection from response shape — dirsearch
-        # doesn't return body, but a 200 with text/html and a trailing slash path
-        # is the most common signature.
+            kind_flags.append("swagger_exposed")
         if (
             status == 200
             and path.endswith("/")
             and isinstance(ctype, str)
             and "text/html" in ctype.lower()
         ):
-            findings.append(_finding("directory_indexing", "med", path, evidence))
-
-        # Classifier-driven low/med findings
+            kind_flags.append("directory_indexing")
         flags = _classify(path)
         for flag_name, kind in (
             ("is_admin", "admin_panel"),
@@ -268,16 +256,48 @@ def _parse_dirsearch_json(
             ("is_api", "api_endpoint"),
             ("is_upload", "upload_form"),
         ):
-            if not flags.get(flag_name):
-                continue
-            findings.append(
-                _finding(
-                    kind,
-                    "med" if flag_name in {"is_admin", "is_upload"} else "low",
-                    path,
-                    evidence,
-                )
+            if flags.get(flag_name):
+                kind_flags.append(kind)
+
+        evidence = {
+            "url": url,
+            "path": path,
+            "status": status,
+            "content_type": ctype,
+            "content_length": length,
+            "redirect": redirect,
+            "flags": kind_flags,
+        }
+
+        # Emit ONE discovered_endpoint finding per result so plain hits show
+        # up in the UI even without classifier matches.
+        severity = (
+            "high"
+            if any(k in {"exposed_dotgit", "exposed_dotenv"} for k in kind_flags)
+            else "med"
+            if any(
+                k in {
+                    "backup_file", "swagger_exposed", "directory_indexing",
+                    "admin_panel", "upload_form",
+                }
+                for k in kind_flags
             )
+            else "low"
+            if kind_flags
+            else "info"
+        )
+        findings.append(
+            FindingRecord(
+                kind="discovered_endpoint",
+                severity=severity,
+                title=f"{status if status is not None else '?'} {path}"[:200],
+                description=(
+                    f"dirsearch discovered {url} (HTTP {status})."
+                    + (f" Classifier: {', '.join(kind_flags)}." if kind_flags else "")
+                ),
+                evidence=evidence,
+            )
+        )
 
     return endpoints, findings
 
