@@ -1170,7 +1170,7 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
     const status = scan.data?.status;
     if (!status || status === "completed" || status === "failed") return;
 
-    const es = new EventSource(sseUrl(`/vuln-scans/${params.id}/stream`));
+    const es = new EventSource(sseUrl(`/vuln-scans/${params.id}/stream`), { withCredentials: true });
     const refetch = () => {
       qc.invalidateQueries({ queryKey: ["vuln-scan", params.id] });
       qc.invalidateQueries({ queryKey: ["vuln-overview", params.id] });

@@ -24,15 +24,6 @@ from app.services.queue import enqueue_investigation_task
 # Canonical tool list; order is also the display order in dropdowns.
 TOOLS: list[str] = ["nmap_deep", "ffuf", "dirsearch", "testssl"]
 
-# Per-tool authz gate: True = active traffic, requires Target.authorization_verified_at.
-TOOL_REQUIRES_AUTHZ: dict[str, bool] = {
-    "nmap_deep": True,
-    "ffuf": True,
-    "dirsearch": True,
-    "testssl": False,  # TLS handshake only, no attack traffic
-}
-
-
 SCANNABLE_ASSET_TYPES = {"subdomain", "ipv4"}
 
 

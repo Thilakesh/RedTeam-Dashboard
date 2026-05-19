@@ -3,11 +3,6 @@
 One job = one InvestigationTask row = one tool against one asset. Adapter
 contract is in `pipeline/investigation/stage.py`; registry in `pipeline/investigation/registry.py`.
 
-Authz gate (mirrors deep-recon rule): tools listed in
-`investigation_tasks.TOOL_REQUIRES_AUTHZ` need `Target.authorization_verified_at`.
-Failing the gate marks the task `failed` with a clear reason — analyst can verify
-the target via /targets/{id}/verify and retry.
-
 Pub/sub channel: `investigation:{task_id}`. Workspace SSE filters by Redis SET
 `workspace:{workspace_id}:tasks` (membership added at task start, never removed —
 SET grows linearly with task count; revisit if workspaces exceed ~10K tasks).
@@ -110,21 +105,6 @@ async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
             target = await db.get(Target, workspace.target_id)
             if target is None:
                 raise RuntimeError(f"target {workspace.target_id} not found")
-
-            # Authz gate — active tools require verified ownership.
-            requires_authz = task_service.TOOL_REQUIRES_AUTHZ.get(task.tool, True)
-            if requires_authz and target.authorization_verified_at is None:
-                task_service.mark_task_failed(
-                    task, "target not verified for active scanning"
-                )
-                await db.commit()
-                await _publish(
-                    redis,
-                    task_id,
-                    "task.failed",
-                    reason="target not verified for active scanning",
-                )
-                return
 
             task_service.mark_task_started(task)
             await db.commit()

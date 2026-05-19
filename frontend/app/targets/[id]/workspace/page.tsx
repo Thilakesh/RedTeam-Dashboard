@@ -118,7 +118,7 @@ function WorkspaceContent({ params }: { params: { id: string } }) {
   // SSE: refresh tasks + overview + subdomains on any task.* event
   useEffect(() => {
     if (!wsId) return;
-    const es = new EventSource(sseUrl(`/target-workspaces/${wsId}/stream`));
+    const es = new EventSource(sseUrl(`/target-workspaces/${wsId}/stream`), { withCredentials: true });
     const refetch = () => {
       qc.invalidateQueries({ queryKey: ["workspace-tasks", wsId] });
       qc.invalidateQueries({ queryKey: ["workspace-overview", wsId] });
