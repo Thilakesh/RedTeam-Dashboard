@@ -26,20 +26,28 @@ from app.services import sessions as session_svc
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+def _profile_out(row: User) -> UserOut:
+    s = get_settings()
+    return UserOut(
+        id=row.id,
+        email=row.email,
+        first_name=row.first_name,
+        last_name=row.last_name,
+        role=row.role.value,
+        is_active=row.is_active,
+        is_super_admin=row.email.lower() == s.super_admin_email.lower(),
+        created_by=row.created_by,
+        created_at=row.created_at,
+    )
+
+
 @router.get("/profile", response_model=UserOut)
 async def get_profile(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserOut:
     row = await db.get(User, user.id)
-    return UserOut(
-        id=row.id,
-        email=row.email,
-        role=row.role.value,
-        is_active=row.is_active,
-        created_by=row.created_by,
-        created_at=row.created_at,
-    )
+    return _profile_out(row)
 
 
 @router.patch("/profile", response_model=UserOut)
@@ -70,6 +78,14 @@ async def patch_profile(
         row.email = req.email
         changes["email"] = req.email
 
+    if req.first_name is not None and req.first_name != (row.first_name or ""):
+        row.first_name = req.first_name or None
+        changes["first_name"] = req.first_name
+
+    if req.last_name is not None and req.last_name != (row.last_name or ""):
+        row.last_name = req.last_name or None
+        changes["last_name"] = req.last_name
+
     if changes:
         await audit.log(
             db,
@@ -84,14 +100,7 @@ async def patch_profile(
         await db.commit()
         await db.refresh(row)
 
-    return UserOut(
-        id=row.id,
-        email=row.email,
-        role=row.role.value,
-        is_active=row.is_active,
-        created_by=row.created_by,
-        created_at=row.created_at,
-    )
+    return _profile_out(row)
 
 
 @router.get("/system", response_model=SystemSettingsOut, dependencies=[Depends(require_admin())])
@@ -101,8 +110,6 @@ async def get_system_settings() -> SystemSettingsOut:
         bbot_timeout=s.bbot_timeout,
         jwt_access_expire_minutes=s.jwt_access_expire_minutes,
         jwt_refresh_expire_days=s.jwt_refresh_expire_days,
-        rl_login_per_15min=s.rl_login_per_15min,
-        rl_refresh_per_min=s.rl_refresh_per_min,
     )
 
 
@@ -120,12 +127,6 @@ async def patch_system_settings(
     if req.bbot_timeout is not None:
         s.bbot_timeout = req.bbot_timeout
         changes["bbot_timeout"] = req.bbot_timeout
-    if req.rl_login_per_15min is not None:
-        s.rl_login_per_15min = req.rl_login_per_15min
-        changes["rl_login_per_15min"] = req.rl_login_per_15min
-    if req.rl_refresh_per_min is not None:
-        s.rl_refresh_per_min = req.rl_refresh_per_min
-        changes["rl_refresh_per_min"] = req.rl_refresh_per_min
 
     if changes:
         await audit.log(
@@ -140,6 +141,4 @@ async def patch_system_settings(
         bbot_timeout=s.bbot_timeout,
         jwt_access_expire_minutes=s.jwt_access_expire_minutes,
         jwt_refresh_expire_days=s.jwt_refresh_expire_days,
-        rl_login_per_15min=s.rl_login_per_15min,
-        rl_refresh_per_min=s.rl_refresh_per_min,
     )

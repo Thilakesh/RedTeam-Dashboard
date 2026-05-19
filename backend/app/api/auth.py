@@ -19,7 +19,6 @@ from app.api.deps import (
     CurrentUser,
     get_current_user,
 )
-from app.api.middleware import ratelimit
 from app.core import features
 from app.core.config import get_settings
 from app.core.db import get_db
@@ -40,7 +39,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
 
 
-# ---------------- cookie helpers ----------------
+# ---------------- helpers ----------------
+
+
+def _client_ip(request: Request) -> str | None:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
 
 
 def _set_access_cookie(response: Response, token: str) -> None:
@@ -101,7 +107,7 @@ async def _issue_session_and_cookies(
 
     Returns (session, csrf_token). Caller commits.
     """
-    ip = ratelimit._client_ip(request)
+    ip = _client_ip(request)
     ua = request.headers.get("user-agent")
 
     session, raw_refresh = await sessions.create_session(
@@ -155,8 +161,6 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
-    await ratelimit.check_login(request, per_15min=settings.rl_login_per_15min)
-
     user = await db.scalar(select(User).where(User.email == req.email))
     if user is None or user.password_hash is None or not verify_password(req.password, user.password_hash):
         await audit.log(
@@ -214,8 +218,6 @@ async def refresh(
         )
         _clear_auth_cookies(response)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "refresh token reuse detected")
-
-    await ratelimit.check_refresh(request, session_id=str(session.id), per_min=settings.rl_refresh_per_min)
 
     user = await db.get(User, session.user_id)
     if user is None or not user.is_active:

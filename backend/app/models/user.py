@@ -23,6 +23,8 @@ class User(Base):
         PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # Nullable: invite-created users have no password until they accept.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(

@@ -16,6 +16,7 @@ import {
   ScanSearch,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   Sun,
   Users,
 } from "lucide-react";
@@ -55,6 +56,11 @@ const NAV_MAIN: NavItem[] = [
     label: "Target Workspace",
     icon: Crosshair,
     children: [{ href: "/targets", label: "Assets" }],
+  },
+  {
+    href: "/verified-targets",
+    label: "Verified Targets",
+    icon: ShieldCheck,
   },
   { href: "/reports", label: "Reports", icon: FileBarChart2 },
   {
@@ -104,6 +110,7 @@ function buildBreadcrumb(pathname: string): string[] {
   if (pathname === "/reports") return ["Reports"];
   if (pathname.startsWith("/settings")) return ["Settings", ...pathname.split("/").slice(2).map(cap)];
   if (pathname.startsWith("/admin")) return ["Administration", ...pathname.split("/").slice(2).map(cap)];
+  if (pathname.startsWith("/verified-targets")) return ["Verified Targets"];
   const parts = pathname.split("/").filter(Boolean);
   return parts.map(cap);
 }
@@ -128,11 +135,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const crumbs = buildBreadcrumb(pathname || "/");
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen overflow-hidden bg-background flex">
       <Sidebar pathname={pathname || "/"} isAdmin={isAdmin} />
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-screen">
         <TopBar crumbs={crumbs} email={user.email} role={user.role} onLogout={logout} />
-        <main className="flex-1 px-8 py-6 overflow-x-auto scrollbar-thin">{children}</main>
+        <main className="flex-1 px-8 py-6 overflow-auto scrollbar-thin">{children}</main>
       </div>
     </div>
   );

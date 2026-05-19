@@ -28,6 +28,7 @@ from app.schemas.subdomain_view import (
 )
 from app.services import scan_view
 from app.services.queue import enqueue_scan
+from app.services.targets import assert_aggressive_allowed
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
@@ -91,6 +92,9 @@ async def create_scan(
         target = Target(project_id=project_id, domain=req.domain)
         db.add(target)
         await db.flush()
+
+    if req.profile == "deep":
+        await assert_aggressive_allowed(db, target_id=target.id, reason="deep recon")
 
     initial_status = ScanStatus.created if req.autostart else ScanStatus.queued
     scan = Scan(

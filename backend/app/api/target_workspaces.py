@@ -43,6 +43,7 @@ from app.schemas.target_workspace import (
 )
 from app.services import target_workspace as ws_service
 from app.services import investigation_tasks as task_service
+from app.services.targets import AGGRESSIVE_TOOLS, assert_aggressive_allowed
 
 router = APIRouter(prefix="/target-workspaces", tags=["target-workspaces"])
 
@@ -209,6 +210,9 @@ async def create_investigation_task(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"tool '{req.tool}' is not applicable to this asset",
         )
+
+    if req.tool in AGGRESSIVE_TOOLS:
+        await assert_aggressive_allowed(db, target_id=ws.target_id, reason=f"tool '{req.tool}'")
 
     task = await task_service.create_and_enqueue_task(
         db,

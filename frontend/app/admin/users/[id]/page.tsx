@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { ApiError, api } from "@/lib/api";
@@ -9,8 +9,11 @@ import { ApiError, api } from "@/lib/api";
 type UserRow = {
   id: string;
   email: string;
+  first_name: string | null;
+  last_name: string | null;
   role: "admin" | "analyst";
   is_active: boolean;
+  is_super_admin: boolean;
   created_by: string | null;
   created_at: string;
   has_pending_invite: boolean;
@@ -40,7 +43,7 @@ export default function AdminUserDetailPage() {
   });
 
   const patch = useMutation({
-    mutationFn: (body: Partial<{ role: string; is_active: boolean }>) =>
+    mutationFn: (body: Partial<{ role: string; is_active: boolean; first_name: string; last_name: string }>) =>
       api<UserRow>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "user", id] }),
   });
@@ -67,14 +70,31 @@ export default function AdminUserDetailPage() {
     onSuccess: () => router.replace("/admin/users"),
   });
 
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  useEffect(() => {
+    if (user.data) {
+      setFirstName(user.data.first_name ?? "");
+      setLastName(user.data.last_name ?? "");
+    }
+  }, [user.data]);
+
   if (!user.data) return <AppShell><div /></AppShell>;
   const u = user.data;
+  const isSuper = u.is_super_admin;
 
   return (
     <AppShell>
       <div className="max-w-3xl space-y-6">
         <header>
-          <h1 className="text-2xl font-semibold tracking-tight">{u.email}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            {u.email}
+            {isSuper && (
+              <span className="text-[10px] uppercase tracking-wide text-amber-400 border border-amber-500/40 rounded px-1.5 py-0.5">
+                Super Admin
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1 capitalize">
             {u.role} · {u.is_active ? "active" : "disabled"}
             {u.has_pending_invite && " · invite pending"}
@@ -82,17 +102,57 @@ export default function AdminUserDetailPage() {
         </header>
 
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+          <h2 className="text-sm font-semibold">Profile</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">First name</label>
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Last name</label>
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <button
+            onClick={() =>
+              patch.mutate({ first_name: firstName, last_name: lastName })
+            }
+            disabled={patch.isPending || (firstName === (u.first_name ?? "") && lastName === (u.last_name ?? ""))}
+            className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground disabled:opacity-50"
+          >
+            Save name
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <h2 className="text-sm font-semibold">Role & status</h2>
+          {isSuper && (
+            <p className="text-xs text-amber-400">
+              Super admin — role, disable, and delete are protected.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => patch.mutate({ role: u.role === "admin" ? "analyst" : "admin" })}
-              className="text-xs px-3 py-1.5 rounded border border-border hover:bg-accent"
+              disabled={isSuper}
+              className="text-xs px-3 py-1.5 rounded border border-border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+              title={isSuper ? "Super admin protected" : ""}
             >
               Make {u.role === "admin" ? "analyst" : "admin"}
             </button>
             <button
               onClick={() => patch.mutate({ is_active: !u.is_active })}
-              className="text-xs px-3 py-1.5 rounded border border-border hover:bg-accent"
+              disabled={isSuper}
+              className="text-xs px-3 py-1.5 rounded border border-border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+              title={isSuper ? "Super admin protected" : ""}
             >
               {u.is_active ? "Disable" : "Enable"}
             </button>
@@ -106,7 +166,9 @@ export default function AdminUserDetailPage() {
               onClick={() => {
                 if (confirm(`Delete (disable) ${u.email}?`)) del.mutate();
               }}
-              className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-400 hover:bg-red-500/10"
+              disabled={isSuper}
+              className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={isSuper ? "Super admin protected" : ""}
             >
               Delete user
             </button>

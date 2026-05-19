@@ -48,4 +48,12 @@ class Target(Base):
     authorization_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     authorization_proof: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # Admin-asserted trust flag (see migration 0014). True unlocks aggressive
+    # scan profiles. Orthogonal to authorization_verified_at (ownership proof).
+    is_verified: Mapped[bool] = mapped_column(default=False, server_default="false", index=True)
+    verified_by: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     project: Mapped[Project] = relationship(back_populates="targets")

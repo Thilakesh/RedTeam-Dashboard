@@ -41,6 +41,7 @@ from app.schemas.vuln import (
 )
 from app.services import vuln_view
 from app.services.queue import enqueue_vuln_scan
+from app.services.targets import assert_aggressive_allowed
 
 router = APIRouter(prefix="/vuln-scans", tags=["vuln-scans"])
 
@@ -107,6 +108,11 @@ async def create_vuln_scan(
 
     if parent_scan.status != ScanStatus.completed:
         raise HTTPException(status.HTTP_409_CONFLICT, "parent recon scan not complete")
+
+    if req.intrusive:
+        await assert_aggressive_allowed(
+            db, target_id=parent_scan.target_id, reason="intrusive vulnerability scan"
+        )
 
     scan = Scan(
         kind=ScanKind.vuln_analysis,

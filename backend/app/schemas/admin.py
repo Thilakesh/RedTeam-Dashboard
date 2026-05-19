@@ -9,8 +9,11 @@ class UserOut(BaseModel):
 
     id: UUID
     email: EmailStr
+    first_name: str | None = None
+    last_name: str | None = None
     role: str
     is_active: bool
+    is_super_admin: bool = False
     created_by: UUID | None
     created_at: datetime
     has_pending_invite: bool = False
@@ -18,6 +21,8 @@ class UserOut(BaseModel):
 
 class UserCreateRequest(BaseModel):
     email: EmailStr
+    first_name: str | None = Field(default=None, max_length=80)
+    last_name: str | None = Field(default=None, max_length=80)
     role: str = Field(pattern="^(admin|analyst)$", default="analyst")
 
 
@@ -28,6 +33,8 @@ class UserCreateResponse(BaseModel):
 
 
 class UserPatchRequest(BaseModel):
+    first_name: str | None = Field(default=None, max_length=80)
+    last_name: str | None = Field(default=None, max_length=80)
     role: str | None = Field(default=None, pattern="^(admin|analyst)$")
     is_active: bool | None = None
 
@@ -72,6 +79,8 @@ class AuditOut(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     email: EmailStr | None = None
+    first_name: str | None = Field(default=None, max_length=80)
+    last_name: str | None = Field(default=None, max_length=80)
     new_password: str | None = Field(default=None, min_length=8, max_length=128)
     current_password: str | None = None
 
@@ -80,13 +89,9 @@ class SystemSettingsOut(BaseModel):
     bbot_timeout: int
     jwt_access_expire_minutes: int
     jwt_refresh_expire_days: int
-    rl_login_per_15min: int
-    rl_refresh_per_min: int
 
 
 class SystemSettingsPatchRequest(BaseModel):
     """Only mutable knobs surfaced for now; everything else is env-controlled."""
 
     bbot_timeout: int | None = Field(default=None, ge=60, le=14400)
-    rl_login_per_15min: int | None = Field(default=None, ge=1, le=1000)
-    rl_refresh_per_min: int | None = Field(default=None, ge=1, le=1000)

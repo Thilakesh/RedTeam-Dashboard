@@ -9,8 +9,11 @@ import { ApiError, api } from "@/lib/api";
 type UserRow = {
   id: string;
   email: string;
+  first_name: string | null;
+  last_name: string | null;
   role: "admin" | "analyst";
   is_active: boolean;
+  is_super_admin: boolean;
   created_by: string | null;
   created_at: string;
   has_pending_invite: boolean;
@@ -32,19 +35,6 @@ export default function AdminUsersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [createdInvite, setCreatedInvite] = useState<CreateResp | null>(null);
 
-  const create = useMutation({
-    mutationFn: (vars: { email: string; role: string }) =>
-      api<CreateResp>("/users", {
-        method: "POST",
-        body: JSON.stringify(vars),
-      }),
-    onSuccess: (resp) => {
-      setCreatedInvite(resp);
-      setShowCreate(false);
-      qc.invalidateQueries({ queryKey: ["admin", "users"] });
-    },
-  });
-
   return (
     <AppShell>
       <div className="space-y-6">
@@ -56,14 +46,23 @@ export default function AdminUsersPage() {
             </p>
           </div>
           <button
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={() => setShowCreate(true)}
             className="bg-primary text-primary-foreground rounded px-4 py-2 text-sm font-medium"
           >
-            {showCreate ? "Cancel" : "New user"}
+            Add User
           </button>
         </header>
 
-        {showCreate && <CreateUserForm onSubmit={(vars) => create.mutate(vars)} pending={create.isPending} error={create.error instanceof ApiError ? create.error.message : null} />}
+        {showCreate && (
+          <CreateUserModal
+            onClose={() => setShowCreate(false)}
+            onCreated={(resp) => {
+              setShowCreate(false);
+              setCreatedInvite(resp);
+              qc.invalidateQueries({ queryKey: ["admin", "users"] });
+            }}
+          />
+        )}
 
         {createdInvite && (
           <InvitePanel
@@ -77,6 +76,7 @@ export default function AdminUsersPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
               <tr>
+                <th className="text-left px-3 py-2">Name</th>
                 <th className="text-left px-3 py-2">Email</th>
                 <th className="text-left px-3 py-2">Role</th>
                 <th className="text-left px-3 py-2">Status</th>
@@ -85,30 +85,41 @@ export default function AdminUsersPage() {
               </tr>
             </thead>
             <tbody>
-              {list.data?.map((u) => (
-                <tr key={u.id} className="border-t border-border">
-                  <td className="px-3 py-2">{u.email}</td>
-                  <td className="px-3 py-2 capitalize">{u.role}</td>
-                  <td className="px-3 py-2">
-                    {!u.is_active ? (
-                      <span className="text-red-400">disabled</span>
-                    ) : u.has_pending_invite ? (
-                      <span className="text-amber-400">invite pending</span>
-                    ) : (
-                      <span className="text-emerald-400">active</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Link
-                      href={`/admin/users/${u.id}`}
-                      className="text-xs underline text-primary hover:opacity-80"
-                    >
-                      Edit
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {list.data?.map((u) => {
+                const fullName = [u.first_name, u.last_name].filter(Boolean).join(" ") || "—";
+                return (
+                  <tr key={u.id} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      {fullName}
+                      {u.is_super_admin && (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-400 border border-amber-500/40 rounded px-1.5 py-0.5">
+                          Super
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">{u.email}</td>
+                    <td className="px-3 py-2 capitalize">{u.role}</td>
+                    <td className="px-3 py-2">
+                      {!u.is_active ? (
+                        <span className="text-red-400">disabled</span>
+                      ) : u.has_pending_invite ? (
+                        <span className="text-amber-400">invite pending</span>
+                      ) : (
+                        <span className="text-emerald-400">active</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
+                    <td className="px-3 py-2 text-right">
+                      <Link
+                        href={`/admin/users/${u.id}`}
+                        className="text-xs underline text-primary hover:opacity-80"
+                      >
+                        Edit
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -117,59 +128,132 @@ export default function AdminUsersPage() {
   );
 }
 
-function CreateUserForm({
-  onSubmit,
-  pending,
-  error,
+function CreateUserModal({
+  onClose,
+  onCreated,
 }: {
-  onSubmit: (v: { email: string; role: string }) => void;
-  pending: boolean;
-  error: string | null;
+  onClose: () => void;
+  onCreated: (resp: CreateResp) => void;
 }) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("analyst");
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<CreateResp>("/users", {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          role,
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
+        }),
+      }),
+    onSuccess: onCreated,
+  });
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit({ email, role });
-      }}
-      className="rounded-lg border border-border bg-card p-4 space-y-3 max-w-lg"
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      onClick={onClose}
     >
-      <div>
-        <label className="text-sm font-medium">Email</label>
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
-        />
-      </div>
-      <div>
-        <label className="text-sm font-medium">Role</label>
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-          className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
-        >
-          <option value="analyst">analyst</option>
-          <option value="admin">admin</option>
-        </select>
-      </div>
-      {error && <p className="text-red-400 text-sm">{error}</p>}
-      <button
-        type="submit"
-        disabled={pending}
-        className="bg-primary text-primary-foreground rounded px-4 py-2 text-sm font-medium disabled:opacity-50"
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          create.mutate();
+        }}
+        className="w-full max-w-md rounded-lg border border-border bg-card p-6 space-y-4"
       >
-        {pending ? "Creating..." : "Create + generate invite link"}
-      </button>
-    </form>
+        <header className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Add User</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            close
+          </button>
+        </header>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm font-medium">First name</label>
+            <input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Last name</label>
+            <input
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium">Role</label>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
+          >
+            <option value="analyst">analyst</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium">Email</label>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mt-1 w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-sm"
+          />
+        </div>
+
+        {create.error instanceof ApiError && (
+          <p className="text-red-400 text-sm">{create.error.message}</p>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded px-4 py-2 text-sm border border-border hover:bg-accent"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={create.isPending}
+            className="bg-primary text-primary-foreground rounded px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            {create.isPending ? "Creating..." : "Generate Invite Link"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
-function InvitePanel({ url, email, onClose }: { url: string; email: string; onClose: () => void }) {
+function InvitePanel({
+  url,
+  email,
+  onClose,
+}: {
+  url: string;
+  email: string;
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4 space-y-3 max-w-2xl">

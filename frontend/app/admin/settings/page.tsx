@@ -9,8 +9,6 @@ type SystemSettings = {
   bbot_timeout: number;
   jwt_access_expire_minutes: number;
   jwt_refresh_expire_days: number;
-  rl_login_per_15min: number;
-  rl_refresh_per_min: number;
 };
 
 export default function AdminSettingsPage() {
@@ -60,20 +58,6 @@ export default function AdminSettingsPage() {
             max={14400}
             value={cur.bbot_timeout}
             onChange={(v) => setDraft({ ...draft, bbot_timeout: v })}
-          />
-          <NumberField
-            label="login attempts per 15 minutes (per IP)"
-            min={1}
-            max={1000}
-            value={cur.rl_login_per_15min}
-            onChange={(v) => setDraft({ ...draft, rl_login_per_15min: v })}
-          />
-          <NumberField
-            label="refresh attempts per minute (per session)"
-            min={1}
-            max={1000}
-            value={cur.rl_refresh_per_min}
-            onChange={(v) => setDraft({ ...draft, rl_refresh_per_min: v })}
           />
 
           <div className="text-xs text-muted-foreground space-y-1 border-t border-border pt-3">

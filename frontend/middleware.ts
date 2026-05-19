@@ -12,6 +12,7 @@ const PROTECTED_PREFIXES = [
   "/reports",
   "/settings",
   "/admin",
+  "/verified-targets",
 ];
 
 const PUBLIC_PATHS = ["/login", "/accept-invite"];

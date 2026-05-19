@@ -28,16 +28,16 @@ class Settings(BaseSettings):
     admin_email: str = "alpha@gmail.com"
     admin_password: str = "Testing123@"
 
+    # Super-admin: cannot be disabled, demoted, or deleted by other admins.
+    # Defaults to the bootstrap admin email; overridable via env.
+    super_admin_email: str = "alpha@gmail.com"
+
     # Singleton org under which every user lives now that org signup is gone.
     default_org_name: str = "Default Organization"
     default_project_name: str = "default"
 
     # Invite tokens — copy-link delivery, single-use, short TTL.
     invite_ttl_hours: int = 24
-
-    # Rate limiting (Redis-backed counters).
-    rl_login_per_15min: int = 5
-    rl_refresh_per_min: int = 10
 
     cors_origins: list[str] = Field(default=["http://localhost:3000"])
     cors_origin_regex: str = Field(

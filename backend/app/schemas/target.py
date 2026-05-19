@@ -15,6 +15,25 @@ class TargetOut(BaseModel):
     authorization_token: str | None = None
     authorization_verified_at: datetime | None = None
     authorization_proof: str | None = None
+    is_verified: bool = False
+    verified_by: UUID | None = None
+    verified_at: datetime | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class VerifiedTargetCreateRequest(BaseModel):
+    domain: str
+
+
+class VerifiedTargetOut(BaseModel):
+    id: UUID
+    domain: str
+    is_verified: bool
+    verified_by: UUID | None
+    verified_by_email: str | None = None
+    verified_at: datetime | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

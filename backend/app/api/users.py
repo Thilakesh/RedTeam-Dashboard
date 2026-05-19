@@ -2,6 +2,12 @@
 
 Public signup is gone — admins create users; new user receives a copy-link
 invite URL; user POSTs /auth/invite/accept to set their password and log in.
+
+Super admin (settings.super_admin_email, defaults to alpha@gmail.com):
+- cannot be disabled
+- cannot be demoted
+- cannot be deleted
+- can only be edited by themselves (via /settings/profile)
 """
 from __future__ import annotations
 
@@ -36,12 +42,19 @@ def _frontend_base() -> str:
     return os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 
+def _is_super_admin(user: User) -> bool:
+    return user.email.lower() == settings.super_admin_email.lower()
+
+
 def _user_out(user: User) -> UserOut:
     return UserOut(
         id=user.id,
         email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
         role=user.role.value,
         is_active=user.is_active,
+        is_super_admin=_is_super_admin(user),
         created_by=user.created_by,
         created_at=user.created_at,
         has_pending_invite=invites.has_pending_invite(user),
@@ -77,6 +90,8 @@ async def create_user(
     user = User(
         org_id=org.id,
         email=req.email,
+        first_name=req.first_name,
+        last_name=req.last_name,
         password_hash=None,
         role=UserRole(req.role),
         is_active=True,
@@ -130,8 +145,25 @@ async def patch_user(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
 
+    # Super-admin protections: another admin cannot demote, disable, or
+    # otherwise alter the super admin's role/active state. Name/email tweaks
+    # still go through /settings/profile (the super admin edits their own).
+    if _is_super_admin(user) and actor.id != user.id:
+        if req.role is not None and req.role != user.role.value:
+            raise HTTPException(status.HTTP_409_CONFLICT, "cannot change super admin's role")
+        if req.is_active is not None and req.is_active != user.is_active:
+            raise HTTPException(status.HTTP_409_CONFLICT, "cannot disable super admin")
+
     changes: dict[str, str] = {}
     revoke_sessions = False
+
+    if req.first_name is not None and req.first_name != (user.first_name or ""):
+        user.first_name = req.first_name or None
+        changes["first_name"] = req.first_name
+
+    if req.last_name is not None and req.last_name != (user.last_name or ""):
+        user.last_name = req.last_name or None
+        changes["last_name"] = req.last_name
 
     if req.role is not None and req.role != user.role.value:
         new_role = UserRole(req.role)
@@ -187,6 +219,8 @@ async def delete_user(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
     if user.id == actor.id:
         raise HTTPException(status.HTTP_409_CONFLICT, "cannot delete yourself")
+    if _is_super_admin(user):
+        raise HTTPException(status.HTTP_409_CONFLICT, "cannot delete super admin")
     user.is_active = False
     await sessions.revoke_all_for_user(db, user_id=user.id, reason="admin_revoke")
     await audit.log(
