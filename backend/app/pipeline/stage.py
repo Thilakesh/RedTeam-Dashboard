@@ -45,9 +45,6 @@ class Stage(Protocol):
     # If True, a failure or timeout is logged and skipped rather than aborting the scan.
     # Use for enrichment/backup stages (amass, geoip) where partial results are acceptable.
     optional: bool
-    # If True, this stage requires the target to be authorization-verified before it will
-    # run. The coordinator skips it (with an on_skip callback) when the target is unverified.
-    authz_required: bool
 
     async def execute(self, ctx: StageContext) -> list[AssetRecord]: ...
 

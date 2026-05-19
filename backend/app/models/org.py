@@ -44,16 +44,5 @@ class Target(Base):
     kind: Mapped[str] = mapped_column(String(20), default="domain")
     monitoring_enabled: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    authorization_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    authorization_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    authorization_proof: Mapped[str | None] = mapped_column(String(20), nullable=True)
-
-    # Admin-asserted trust flag (see migration 0014). True unlocks aggressive
-    # scan profiles. Orthogonal to authorization_verified_at (ownership proof).
-    is_verified: Mapped[bool] = mapped_column(default=False, server_default="false", index=True)
-    verified_by: Mapped[UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="targets")

@@ -1,7 +1,7 @@
 """nmap — service/version detection on ports discovered by naabu.
 
-Active stage: authz_required=True. Reads `service` assets from naabu, groups them
-by host, runs nmap -sV per host to identify service names and versions.
+Reads `service` assets from naabu, groups them by host, runs nmap -sV per host
+to identify service names and versions.
 
 Emits `service` type assets enriching naabu output with service/product/version info.
 """
@@ -26,7 +26,6 @@ class NmapStage:
     depends_on = ["naabu"]
     weight = 80
     optional = True
-    authz_required = True
 
     _MAX_HOSTS = 50
 

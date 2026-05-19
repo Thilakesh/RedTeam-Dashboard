@@ -10,9 +10,9 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import (
     Asset,
+    InvestigationTaskStatus,
     Scan,
     ScanKind,
     ScanStatus,
@@ -41,9 +42,9 @@ from app.schemas.target_workspace import (
     WorkspaceSubdomainRow,
     WorkspaceSubdomainsResponse,
 )
+from app.services import audit
 from app.services import target_workspace as ws_service
 from app.services import investigation_tasks as task_service
-from app.services.targets import AGGRESSIVE_TOOLS, assert_aggressive_allowed
 
 router = APIRouter(prefix="/target-workspaces", tags=["target-workspaces"])
 
@@ -147,6 +148,45 @@ async def get_workspace(
     return _workspace_out(ws, domain)
 
 
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace(
+    workspace_id: UUID,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a workspace + all its investigation tasks and findings (cascade).
+    Refuses if any child task is still in flight."""
+    ws, domain = await _get_workspace_for_user(workspace_id, db, user)
+
+    in_flight = await db.scalar(
+        select(func.count(InvestigationTask.id)).where(
+            InvestigationTask.workspace_id == ws.id,
+            InvestigationTask.status.in_(
+                [InvestigationTaskStatus.queued, InvestigationTaskStatus.running]
+            ),
+        )
+    )
+    if in_flight:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{in_flight} task(s) still running — cancel them first",
+        )
+
+    await db.delete(ws)
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="workspace.deleted",
+        target_type="workspace",
+        target_id=workspace_id,
+        meta={"domain": domain, "label": ws.label},
+        request=request,
+        commit=False,
+    )
+    await db.commit()
+
+
 @router.get("/{workspace_id}/overview", response_model=WorkspaceOverview)
 async def get_workspace_overview(
     workspace_id: UUID,
@@ -210,9 +250,6 @@ async def create_investigation_task(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"tool '{req.tool}' is not applicable to this asset",
         )
-
-    if req.tool in AGGRESSIVE_TOOLS:
-        await assert_aggressive_allowed(db, target_id=ws.target_id, reason=f"tool '{req.tool}'")
 
     task = await task_service.create_and_enqueue_task(
         db,
@@ -302,6 +339,52 @@ async def get_investigation_task(
         ],
         raw_output=task.raw_output,
     )
+
+
+@router.delete(
+    "/{workspace_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_investigation_task(
+    workspace_id: UUID,
+    task_id: UUID,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete an investigation task + its findings (cascade). Refuses if the
+    task is still queued or running."""
+    ws, _ = await _get_workspace_for_user(workspace_id, db, user)
+    task = await db.scalar(
+        select(InvestigationTask).where(
+            InvestigationTask.id == task_id,
+            InvestigationTask.workspace_id == ws.id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "task not found")
+    if task.status in (
+        InvestigationTaskStatus.queued,
+        InvestigationTaskStatus.running,
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "cancel the task before deleting"
+        )
+
+    tool = task.tool
+    status_at_delete = task.status.value if hasattr(task.status, "value") else str(task.status)
+    await db.delete(task)
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="investigation_task.deleted",
+        target_type="investigation_task",
+        target_id=task_id,
+        meta={"workspace_id": str(workspace_id), "tool": tool, "status_at_delete": status_at_delete},
+        request=request,
+        commit=False,
+    )
+    await db.commit()
 
 
 @router.get("/{workspace_id}/stream")

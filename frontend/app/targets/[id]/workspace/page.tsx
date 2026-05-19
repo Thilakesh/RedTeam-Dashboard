@@ -13,6 +13,7 @@ import {
   Globe,
   Play,
   Server,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
@@ -31,6 +32,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TOOL_LABELS,
   createInvestigationTask,
+  deleteInvestigationTask,
+  deleteWorkspace,
   getWorkspaceOverview,
   getWorkspaceSubdomains,
   listWorkspaceTasks,
@@ -101,6 +104,15 @@ function WorkspaceContent({ params }: { params: { id: string } }) {
         ? 4000
         : false;
     },
+  });
+
+  const doDeleteWs = useMutation({
+    mutationFn: (id: string) => deleteWorkspace(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      router.push("/targets");
+    },
+    onError: (e) => alert((e as Error).message),
   });
 
   // SSE: refresh tasks + overview + subdomains on any task.* event
@@ -178,6 +190,25 @@ function WorkspaceContent({ params }: { params: { id: string } }) {
               </>
             )}
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => {
+              if (
+                confirm(
+                  `Delete workspace "${workspace.label}"? Removes all investigation tasks and findings.`,
+                )
+              ) {
+                doDeleteWs.mutate(workspace.id);
+              }
+            }}
+            disabled={doDeleteWs.isPending}
+          >
+            <Trash2 className="h-4 w-4" /> Delete workspace
+          </Button>
         </div>
       </div>
 
@@ -635,6 +666,16 @@ function TasksTab({
   workspaceId: string;
   targetId: string;
 }) {
+  const qc = useQueryClient();
+  const doDelete = useMutation({
+    mutationFn: (taskId: string) => deleteInvestigationTask(workspaceId, taskId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["workspace-tasks", workspaceId] });
+      qc.invalidateQueries({ queryKey: ["workspace-overview", workspaceId] });
+    },
+    onError: (e) => alert((e as Error).message),
+  });
+
   if (loading) {
     return <p className="text-sm text-muted-foreground py-6">Loading tasks…</p>;
   }
@@ -663,39 +704,65 @@ function TasksTab({
           </tr>
         </thead>
         <tbody>
-          {rows.map((t) => (
-            <tr
-              key={t.id}
-              className="border-b border-border hover:bg-muted/30 transition-colors"
-            >
-              <td className="px-4 py-3 font-mono text-xs">{t.id.slice(0, 8)}…</td>
-              <td className="px-4 py-3">{t.asset_label}</td>
-              <td className="px-4 py-3 text-xs">{TOOL_LABELS[t.tool] ?? t.tool}</td>
-              <td className="px-4 py-3">
-                <Badge variant={TASK_STATUS_VARIANT[t.status] ?? "default"}>
-                  {t.status}
-                </Badge>
-              </td>
-              <td className="px-4 py-3 text-xs">
-                {t.status === "running"
-                  ? `${t.progress_pct}%`
-                  : t.status === "completed"
-                    ? "100%"
-                    : "—"}
-              </td>
-              <td className="px-4 py-3 text-xs text-muted-foreground">
-                {t.duration_s != null ? `${Math.round(t.duration_s)}s` : "—"}
-              </td>
-              <td className="px-4 py-3">
-                <Link
-                  href={`/targets/${targetId}/workspace/tasks/${t.id}`}
-                  className="text-xs underline hover:text-foreground"
-                >
-                  View
-                </Link>
-              </td>
-            </tr>
-          ))}
+          {rows.map((t) => {
+            const deletable =
+              t.status !== "queued" && t.status !== "running";
+            return (
+              <tr
+                key={t.id}
+                className="border-b border-border hover:bg-muted/30 transition-colors"
+              >
+                <td className="px-4 py-3 font-mono text-xs">{t.id.slice(0, 8)}…</td>
+                <td className="px-4 py-3">{t.asset_label}</td>
+                <td className="px-4 py-3 text-xs">{TOOL_LABELS[t.tool] ?? t.tool}</td>
+                <td className="px-4 py-3">
+                  <Badge variant={TASK_STATUS_VARIANT[t.status] ?? "default"}>
+                    {t.status}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-xs">
+                  {t.status === "running"
+                    ? `${t.progress_pct}%`
+                    : t.status === "completed"
+                      ? "100%"
+                      : "—"}
+                </td>
+                <td className="px-4 py-3 text-xs text-muted-foreground">
+                  {t.duration_s != null ? `${Math.round(t.duration_s)}s` : "—"}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/targets/${targetId}/workspace/tasks/${t.id}`}
+                      className="text-xs underline hover:text-foreground"
+                    >
+                      View
+                    </Link>
+                    {deletable && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `Delete this ${TOOL_LABELS[t.tool] ?? t.tool} task? Removes its findings.`,
+                            )
+                          ) {
+                            doDelete.mutate(t.id);
+                          }
+                        }}
+                        disabled={doDelete.isPending}
+                        title="Delete task"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

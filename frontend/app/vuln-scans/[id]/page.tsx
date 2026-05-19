@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Globe, Calendar, Clock, ExternalLink, Server, Cpu, Network, Lock, Shield, Brain } from "lucide-react";
+import { Globe, Calendar, Clock, ExternalLink, Server, Cpu, Network, Lock, Shield, Brain, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +15,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import {
   api,
+  canDeleteScan,
+  deleteVulnScan,
   sseUrl,
   type ByServiceResponse,
   type ByTechResponse,
@@ -1156,6 +1159,12 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
     queryFn: () => api<VulnScanDetail>(`/vuln-scans/${params.id}`),
   });
 
+  const doDelete = useMutation({
+    mutationFn: () => deleteVulnScan(params.id),
+    onSuccess: () => router.push("/vuln-scans"),
+    onError: (e) => alert((e as Error).message),
+  });
+
   // SSE subscription while scan is running
   useEffect(() => {
     const status = scan.data?.status;
@@ -1237,6 +1246,27 @@ function VulnScanDetailContent({ params }: { params: { id: string } }) {
               </span>
             )}
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {canDeleteScan(s.status) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => {
+                if (
+                  confirm(
+                    `Delete vuln scan for ${s.target_domain}? Removes all stages, vuln evidence, and matches.`,
+                  )
+                ) {
+                  doDelete.mutate();
+                }
+              }}
+              disabled={doDelete.isPending}
+            >
+              <Trash2 className="h-4 w-4" /> Delete vuln scan
+            </Button>
+          )}
         </div>
       </div>
 

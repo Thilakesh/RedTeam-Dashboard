@@ -16,7 +16,6 @@ import {
   ScanSearch,
   Settings,
   ShieldAlert,
-  ShieldCheck,
   Sun,
   Users,
 } from "lucide-react";
@@ -56,11 +55,6 @@ const NAV_MAIN: NavItem[] = [
     label: "Target Workspace",
     icon: Crosshair,
     children: [{ href: "/targets", label: "Assets" }],
-  },
-  {
-    href: "/verified-targets",
-    label: "Verified Targets",
-    icon: ShieldCheck,
   },
   { href: "/reports", label: "Reports", icon: FileBarChart2 },
   {
@@ -110,7 +104,6 @@ function buildBreadcrumb(pathname: string): string[] {
   if (pathname === "/reports") return ["Reports"];
   if (pathname.startsWith("/settings")) return ["Settings", ...pathname.split("/").slice(2).map(cap)];
   if (pathname.startsWith("/admin")) return ["Administration", ...pathname.split("/").slice(2).map(cap)];
-  if (pathname.startsWith("/verified-targets")) return ["Verified Targets"];
   const parts = pathname.split("/").filter(Boolean);
   return parts.map(cap);
 }

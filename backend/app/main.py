@@ -12,7 +12,6 @@ from app.api import (
     target_workspaces,
     targets,
     users as users_api,
-    verified_targets,
     vuln_scans,
     vulns,
 )
@@ -47,7 +46,6 @@ app.include_router(settings_api.router)
 app.include_router(admin_audit.router)
 app.include_router(scans.router)
 app.include_router(targets.router)
-app.include_router(verified_targets.router)
 app.include_router(vuln_scans.router)
 app.include_router(vulns.router)
 app.include_router(target_workspaces.router)

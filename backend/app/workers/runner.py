@@ -47,7 +47,6 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
             target = await db.get(Target, scan.target_id)
             if target is None:
                 raise RuntimeError(f"target {scan.target_id} not found")
-            authorization_verified = target.authorization_verified_at is not None
             profile = scan.profile
             domain = target.domain
             target_id = target.id
@@ -55,8 +54,7 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
             scan.started_at = datetime.now(timezone.utc)
             await db.commit()
 
-        authz_state = [authorization_verified]
-        stages = stages_for(profile, authz_state=authz_state)
+        stages = stages_for(profile)
         weight_total = total_weight(stages)
         await _publish(redis, scan_id, "scan.started", profile=profile)
 
@@ -138,7 +136,6 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
             on_done=on_done,
             on_fail=on_fail,
             on_skip=on_skip,
-            authorization_verified=authz_state,
         )
 
         # Respect a stop that happened mid-run — don't override the stopped status

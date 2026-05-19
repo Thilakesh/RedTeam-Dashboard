@@ -1,12 +1,12 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { ShieldAlert } from "lucide-react";
+import { ShieldAlert, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { api, type VulnScanOut } from "@/lib/api";
+import { api, canDeleteScan, deleteVulnScan, type VulnScanOut } from "@/lib/api";
 
 const STATUS_VARIANT: Record<
   string,
@@ -34,6 +34,7 @@ function ProgressBar({ pct }: { pct: number }) {
 }
 
 export default function VulnScansPage() {
+  const qc = useQueryClient();
   const scans = useQuery({
     queryKey: ["vuln-scans"],
     queryFn: () => api<VulnScanOut[]>("/vuln-scans"),
@@ -45,6 +46,12 @@ export default function VulnScansPage() {
         ? 4000
         : false;
     },
+  });
+
+  const doDelete = useMutation({
+    mutationFn: (id: string) => deleteVulnScan(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["vuln-scans"] }),
+    onError: (e) => alert((e as Error).message),
   });
 
   if (scans.isLoading) {
@@ -107,10 +114,10 @@ export default function VulnScansPage() {
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b border-border">
                 <tr>
-                  {["Target Domain", "Profile", "Status", "Progress", "Created"].map(
-                    (h) => (
+                  {["Target Domain", "Profile", "Status", "Progress", "Created", ""].map(
+                    (h, i) => (
                       <th
-                        key={h}
+                        key={h || `actions-${i}`}
                         className="px-4 py-2.5 text-left font-medium text-xs uppercase tracking-wide text-muted-foreground"
                       >
                         {h}
@@ -179,6 +186,30 @@ export default function VulnScansPage() {
                       {/* Created */}
                       <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                         {new Date(scan.created_at).toLocaleString()}
+                      </td>
+
+                      {/* Delete */}
+                      <td className="px-4 py-3 text-right">
+                        {canDeleteScan(scan.status) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Delete vuln scan for ${scan.target_domain}? Removes all stages, vuln evidence, and matches.`,
+                                )
+                              ) {
+                                doDelete.mutate(scan.id);
+                              }
+                            }}
+                            disabled={doDelete.isPending}
+                            title="Delete vuln scan"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );

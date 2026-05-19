@@ -22,7 +22,6 @@ class NaabuStage:
     depends_on = ["httpx"]
     weight = 60
     optional = True
-    authz_required = True
 
     _MAX_HOSTS = 200
 

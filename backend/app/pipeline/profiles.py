@@ -50,14 +50,7 @@ PROFILES: dict[str, list[Stage]] = {
 }
 
 
-def stages_for(profile: str, authz_state: list[bool] | None = None) -> list[Stage]:
+def stages_for(profile: str) -> list[Stage]:
     if profile not in PROFILES:
         raise ValueError(f"unknown profile: {profile}")
-    stages = list(PROFILES[profile])
-    if profile == "deep" and authz_state is not None:
-        # Import here to avoid circular imports and keep module-level PROFILES dict clean.
-        from app.pipeline.adapters.authz_verifier import AuthzVerifierStage  # noqa: PLC0415
-
-        # Prepend authz verifier at L0 (no deps, runs alongside subfinder/assetfinder).
-        stages = [AuthzVerifierStage(authz_state)] + stages
-    return stages
+    return list(PROFILES[profile])

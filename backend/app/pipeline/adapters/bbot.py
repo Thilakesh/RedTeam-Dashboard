@@ -16,7 +16,6 @@ class BBOTStage:
     depends_on: list[str] = []
     weight = 120
     optional = True
-    authz_required = False
 
     async def execute(self, ctx: StageContext) -> list[AssetRecord]:
         settings = get_settings()

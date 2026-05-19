@@ -151,7 +151,6 @@ export type Scan = {
   started_at: string | null;
   finished_at: string | null;
   error: string | null;
-  target_authz_verified: boolean;
 };
 
 export type ScanStage = {
@@ -301,6 +300,33 @@ export async function patchScan(scanId: string, profile: string): Promise<Scan> 
 
 export async function deleteScan(scanId: string): Promise<void> {
   await api<void>(`/scans/${scanId}`, { method: "DELETE" });
+}
+
+export async function deleteVulnScan(scanId: string): Promise<void> {
+  await api<void>(`/vuln-scans/${scanId}`, { method: "DELETE" });
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  await api<void>(`/target-workspaces/${workspaceId}`, { method: "DELETE" });
+}
+
+export async function deleteInvestigationTask(
+  workspaceId: string,
+  taskId: string,
+): Promise<void> {
+  await api<void>(
+    `/target-workspaces/${workspaceId}/tasks/${taskId}`,
+    { method: "DELETE" },
+  );
+}
+
+// Inactive states where a record can be deleted safely.
+export const DELETABLE_SCAN_STATUSES = new Set([
+  "queued", "completed", "failed", "stopped", "cancelled",
+]);
+
+export function canDeleteScan(status: string): boolean {
+  return DELETABLE_SCAN_STATUSES.has(status);
 }
 
 export type VulnScanOut = {

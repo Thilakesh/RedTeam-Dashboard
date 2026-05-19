@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,9 +26,8 @@ from app.schemas.subdomain_view import (
     SubdomainsPage,
     TechBucket,
 )
-from app.services import scan_view
+from app.services import audit, scan_view
 from app.services.queue import enqueue_scan
-from app.services.targets import assert_aggressive_allowed
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
@@ -42,7 +41,7 @@ async def _default_project_id(db: AsyncSession, org_id: UUID) -> UUID:
     return project_id
 
 
-def _to_scan_out(scan: Scan, domain: str, authz_verified: bool = False) -> ScanOut:
+def _to_scan_out(scan: Scan, domain: str) -> ScanOut:
     return ScanOut(
         id=scan.id,
         domain=domain,
@@ -53,17 +52,16 @@ def _to_scan_out(scan: Scan, domain: str, authz_verified: bool = False) -> ScanO
         started_at=scan.started_at,
         finished_at=scan.finished_at,
         error=scan.error,
-        target_authz_verified=authz_verified,
     )
 
 
 async def _get_scan_and_domain(
     db: AsyncSession, scan_id: UUID, user: CurrentUser
-) -> tuple[Scan, str, bool]:
-    """Returns (scan, domain, target_authz_verified). Analyst sees only own scans."""
+) -> tuple[Scan, str]:
+    """Returns (scan, domain). Analyst sees only own scans."""
     row = (
         await db.execute(
-            select(Scan, Target.domain, Target.authorization_verified_at)
+            select(Scan, Target.domain)
             .join(Target, Target.id == Scan.target_id)
             .where(
                 Scan.id == scan_id,
@@ -74,7 +72,7 @@ async def _get_scan_and_domain(
     ).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")
-    return row.Scan, row.domain, row.authorization_verified_at is not None
+    return row.Scan, row.domain
 
 
 @router.post("", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
@@ -85,16 +83,17 @@ async def create_scan(
 ) -> ScanOut:
     project_id = await _default_project_id(db, user.org_id)
 
+    # Normalize domain (lowercase + strip) so it matches the verified-targets
+    # store, which also stores lowercase. Mismatched case otherwise created a
+    # fresh unverified Target row and tripped the aggressive-scan gate.
+    domain = req.domain.strip().lower()
     target = await db.scalar(
-        select(Target).where(Target.project_id == project_id, Target.domain == req.domain)
+        select(Target).where(Target.project_id == project_id, Target.domain == domain)
     )
     if target is None:
-        target = Target(project_id=project_id, domain=req.domain)
+        target = Target(project_id=project_id, domain=domain)
         db.add(target)
         await db.flush()
-
-    if req.profile == "deep":
-        await assert_aggressive_allowed(db, target_id=target.id, reason="deep recon")
 
     initial_status = ScanStatus.created if req.autostart else ScanStatus.queued
     scan = Scan(
@@ -111,7 +110,7 @@ async def create_scan(
     if req.autostart:
         await enqueue_scan(str(scan.id), profile=scan.profile)
 
-    return _to_scan_out(scan, target.domain, target.authorization_verified_at is not None)
+    return _to_scan_out(scan, target.domain)
 
 
 @router.get("", response_model=list[ScanOut])
@@ -121,7 +120,7 @@ async def list_scans(
 ) -> list[ScanOut]:
     rows = (
         await db.execute(
-            select(Scan, Target.domain, Target.authorization_verified_at)
+            select(Scan, Target.domain)
             .join(Target, Target.id == Scan.target_id)
             .where(
                 Scan.org_id == user.org_id,
@@ -132,7 +131,7 @@ async def list_scans(
             .limit(100)
         )
     ).all()
-    return [_to_scan_out(scan, domain, authz_at is not None) for scan, domain, authz_at in rows]
+    return [_to_scan_out(scan, domain) for scan, domain in rows]
 
 
 @router.post("/{scan_id}/start", response_model=ScanOut)
@@ -141,13 +140,13 @@ async def start_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
-    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user)
+    scan, domain = await _get_scan_and_domain(db, scan_id, user)
     if scan.status != ScanStatus.queued:
         raise HTTPException(status.HTTP_409_CONFLICT, "Scan is not in queued state")
     scan.status = ScanStatus.created
     await db.commit()
     await enqueue_scan(str(scan.id), profile=scan.profile)
-    return _to_scan_out(scan, domain, authz_verified)
+    return _to_scan_out(scan, domain)
 
 
 @router.post("/{scan_id}/stop", response_model=ScanOut)
@@ -156,7 +155,7 @@ async def stop_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
-    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user)
+    scan, domain = await _get_scan_and_domain(db, scan_id, user)
     if scan.status not in (ScanStatus.created, ScanStatus.running):
         raise HTTPException(status.HTTP_409_CONFLICT, "Scan is not running")
     scan.status = ScanStatus.stopped
@@ -170,7 +169,7 @@ async def stop_scan(
         await redis.publish(f"scan:{scan_id}", payload)
     finally:
         await redis.aclose()
-    return _to_scan_out(scan, domain, authz_verified)
+    return _to_scan_out(scan, domain)
 
 
 @router.patch("/{scan_id}", response_model=ScanOut)
@@ -180,24 +179,53 @@ async def update_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
-    scan, domain, authz_verified = await _get_scan_and_domain(db, scan_id, user)
+    scan, domain = await _get_scan_and_domain(db, scan_id, user)
     if scan.status != ScanStatus.queued:
         raise HTTPException(status.HTTP_409_CONFLICT, "Only queued scans can be edited")
     scan.profile = req.profile
     await db.commit()
-    return _to_scan_out(scan, domain, authz_verified)
+    return _to_scan_out(scan, domain)
 
 
 @router.delete("/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_scan(
     scan_id: UUID,
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    scan, _, _authz = await _get_scan_and_domain(db, scan_id, user)
-    if scan.status != ScanStatus.queued:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Only queued scans can be deleted")
+    """Delete any non-in-flight scan. Cascade kills stages, asset
+    observations, and per-scan vuln evidence."""
+    scan, domain = await _get_scan_and_domain(db, scan_id, user)
+    if scan.status in (ScanStatus.created, ScanStatus.running):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "stop the scan before deleting"
+        )
+
+    # Notify SSE subscribers so they close their stream cleanly.
+    settings = get_settings()
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        await redis.publish(
+            f"scan:{scan_id}",
+            json.dumps({"event": "scan.deleted", "scan_id": str(scan_id)}),
+        )
+    finally:
+        await redis.aclose()
+
+    status_at_delete = scan.status.value
+    profile = scan.profile
     await db.delete(scan)
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="scan.deleted",
+        target_type="scan",
+        target_id=scan_id,
+        meta={"domain": domain, "profile": profile, "status_at_delete": status_at_delete},
+        request=request,
+        commit=False,
+    )
     await db.commit()
 
 
@@ -215,8 +243,7 @@ async def get_scan(
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
     target = await db.get(Target, scan.target_id)
-    authz_verified = target.authorization_verified_at is not None if target else False
-    base = _to_scan_out(scan, target.domain if target else "", authz_verified)
+    base = _to_scan_out(scan, target.domain if target else "")
     return ScanDetailOut(**base.model_dump(), stages=scan.stages)
 
 
