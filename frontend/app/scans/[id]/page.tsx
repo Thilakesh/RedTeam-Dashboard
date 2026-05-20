@@ -1,9 +1,9 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, Clock, Crosshair, Download, Globe, Share2 } from "lucide-react";
+import { Calendar, Clock, Crosshair, Download, Globe, Share2, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,9 @@ import { RisksTab } from "@/components/tabs/RisksTab";
 import { SubdomainsTable } from "@/components/SubdomainsTable";
 import {
   api,
+  canDeleteScan,
   createWorkspace,
+  deleteScan,
   sseUrl,
   type ScanDetail,
   type ScanOverview,
@@ -51,6 +53,11 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
   const [vulnLaunching, setVulnLaunching] = useState(false);
   const [wsLaunching, setWsLaunching] = useState(false);
 
+  const doDelete = useMutation({
+    mutationFn: () => deleteScan(params.id),
+    onSuccess: () => router.push("/dashboard/recon-jobs"),
+  });
+
   const scan = useQuery({
     queryKey: ["scan", params.id],
     queryFn: () => api<ScanDetail>(`/scans/${params.id}`),
@@ -66,7 +73,7 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
     const status = scan.data?.status;
     if (!status || status === "completed" || status === "failed") return;
 
-    const es = new EventSource(sseUrl(`/scans/${params.id}/stream`));
+    const es = new EventSource(sseUrl(`/scans/${params.id}/stream`), { withCredentials: true });
     const refetch = () => {
       qc.invalidateQueries({ queryKey: ["scan", params.id] });
       qc.invalidateQueries({ queryKey: ["scan-subdomains", params.id] });
@@ -191,6 +198,21 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
           <Button size="sm">
             <Share2 className="h-4 w-4" /> Share Report
           </Button>
+          {canDeleteScan(s.status) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => {
+                if (confirm(`Delete this scan for ${s.domain}? Removes all stages, assets observed by this scan, and any vuln matches.`)) {
+                  doDelete.mutate();
+                }
+              }}
+              disabled={doDelete.isPending}
+            >
+              <Trash2 className="h-4 w-4" /> Delete scan
+            </Button>
+          )}
         </div>
       </div>
 

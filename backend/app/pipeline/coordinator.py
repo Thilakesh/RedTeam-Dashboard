@@ -75,7 +75,6 @@ async def execute_dag(
     on_done: OnDone,
     on_fail: OnFail,
     on_skip: OnSkip,
-    authorization_verified: bool | list[bool] = False,
 ) -> None:
     """Run the DAG. Required stages abort the scan on failure; optional stages log the
     error and continue so enrichment tools (amass, geoip) don't kill the pipeline.
@@ -84,13 +83,6 @@ async def execute_dag(
 
     for level in _levels(stages):
         async def run_one(stage: Stage) -> StageResult | None:
-            # Auth gate: skip active stages when target is not verified for active scanning.
-            # authorization_verified may be a mutable list[bool] so AuthzVerifierStage
-            # can flip it mid-run and allow later levels to proceed.
-            _auth_ok = authorization_verified[0] if isinstance(authorization_verified, list) else authorization_verified
-            if getattr(stage, "authz_required", False) and not _auth_ok:
-                await on_skip(stage, "target not verified for active scanning")
-                return None
             ctx = StageContext(
                 scan_id=scan_id,
                 target_id=target_id,

@@ -39,6 +39,12 @@ class Scan(Base):
         PgUUID(as_uuid=True), ForeignKey("targets.id", ondelete="CASCADE"), index=True
     )
     org_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), index=True)
+    created_by: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     kind: Mapped[ScanKind] = mapped_column(
         Enum(ScanKind, name="scan_kind", create_type=False),
         nullable=False,

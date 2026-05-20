@@ -1,17 +1,18 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const TOKEN_KEY = "recon_token";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const CSRF_COOKIE = "rt_csrf";
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.split("=")[1]) : null;
 }
 
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+export function getCsrfToken(): string | null {
+  return readCookie(CSRF_COOKIE);
 }
 
 export class ApiError extends Error {
@@ -20,45 +21,125 @@ export class ApiError extends Error {
   }
 }
 
+async function parseError(res: Response): Promise<ApiError> {
+  let detail = res.statusText;
+  try {
+    const body = await res.json();
+    if (typeof body.detail === "string") {
+      detail = body.detail;
+    } else if (Array.isArray(body.detail)) {
+      detail = body.detail
+        .map((e: { loc?: unknown[]; msg?: string }) => {
+          const field = Array.isArray(e.loc) ? e.loc.slice(1).join(".") : "";
+          return field ? `${field}: ${e.msg}` : e.msg;
+        })
+        .join("; ");
+    }
+  } catch {}
+  return new ApiError(res.status, detail);
+}
+
+async function doFetch(
+  path: string,
+  init: RequestInit & { _retry?: boolean } = {},
+): Promise<Response> {
+  const { headers, _retry: _ignored, ...rest } = init;
+  const h = new Headers(headers);
+  if (!h.has("Content-Type") && init.body) h.set("Content-Type", "application/json");
+  const method = (init.method || "GET").toUpperCase();
+  if (!SAFE_METHODS.has(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) h.set("X-CSRF-Token", csrf);
+  }
+  return fetch(`${API_URL}${path}`, {
+    ...rest,
+    headers: h,
+    credentials: "include",
+  });
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const res = await doFetch("/auth/refresh", { method: "POST" });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      // allow next failure to attempt refresh again
+      setTimeout(() => {
+        refreshInFlight = null;
+      }, 0);
+    }
+  })();
+  return refreshInFlight;
+}
+
 export async function api<T>(
   path: string,
-  init: RequestInit & { auth?: boolean } = {},
+  init: RequestInit & { auth?: boolean; skipRefresh?: boolean } = {},
 ): Promise<T> {
-  const { auth = true, headers, ...rest } = init;
-  const h = new Headers(headers);
-  h.set("Content-Type", "application/json");
-  if (auth) {
-    const token = getToken();
-    if (token) h.set("Authorization", `Bearer ${token}`);
+  const { auth: _auth, skipRefresh, ...rest } = init;
+  let res = await doFetch(path, rest);
+
+  if (res.status === 401 && !skipRefresh && path !== "/auth/refresh" && path !== "/auth/login") {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      res = await doFetch(path, rest);
+    } else if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/accept-invite")) {
+      window.location.assign("/login");
+    }
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...rest, headers: h });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      if (typeof body.detail === "string") {
-        detail = body.detail;
-      } else if (Array.isArray(body.detail)) {
-        detail = body.detail
-          .map((e: { loc?: unknown[]; msg?: string }) => {
-            const field = Array.isArray(e.loc) ? e.loc.slice(1).join(".") : "";
-            return field ? `${field}: ${e.msg}` : e.msg;
-          })
-          .join("; ");
-      }
-    } catch {}
-    throw new ApiError(res.status, detail);
-  }
+  if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
 export const sseUrl = (path: string): string => {
-  const token = getToken();
-  const sep = path.includes("?") ? "&" : "?";
-  return `${API_URL}${path}${sep}token=${token ?? ""}`;
+  // Cookies travel with EventSource natively (same-origin or CORS w/ credentials);
+  // no token query param needed under the new cookie-based auth.
+  return `${API_URL}${path}`;
 };
+
+// ----- /auth/me + login/logout typed helpers (used by auth-context) -----
+
+export type Me = {
+  id: string;
+  email: string;
+  role: "admin" | "analyst";
+  org_id: string;
+  features: string[];
+};
+
+export type LoginResponse = { csrf_token: string; user: Me };
+
+export async function login(email: string, password: string): Promise<LoginResponse> {
+  return api<LoginResponse>("/auth/login", {
+    method: "POST",
+    skipRefresh: true,
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function logout(): Promise<void> {
+  await api<void>("/auth/logout", { method: "POST" });
+}
+
+export async function fetchMe(): Promise<Me> {
+  return api<Me>("/auth/me", { skipRefresh: false });
+}
+
+export async function acceptInvite(token: string, password: string): Promise<LoginResponse> {
+  return api<LoginResponse>("/auth/invite/accept", {
+    method: "POST",
+    skipRefresh: true,
+    body: JSON.stringify({ token, password }),
+  });
+}
 
 export type Scan = {
   id: string;
@@ -70,7 +151,6 @@ export type Scan = {
   started_at: string | null;
   finished_at: string | null;
   error: string | null;
-  target_authz_verified: boolean;
 };
 
 export type ScanStage = {
@@ -220,6 +300,33 @@ export async function patchScan(scanId: string, profile: string): Promise<Scan> 
 
 export async function deleteScan(scanId: string): Promise<void> {
   await api<void>(`/scans/${scanId}`, { method: "DELETE" });
+}
+
+export async function deleteVulnScan(scanId: string): Promise<void> {
+  await api<void>(`/vuln-scans/${scanId}`, { method: "DELETE" });
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  await api<void>(`/target-workspaces/${workspaceId}`, { method: "DELETE" });
+}
+
+export async function deleteInvestigationTask(
+  workspaceId: string,
+  taskId: string,
+): Promise<void> {
+  await api<void>(
+    `/target-workspaces/${workspaceId}/tasks/${taskId}`,
+    { method: "DELETE" },
+  );
+}
+
+// Inactive states where a record can be deleted safely.
+export const DELETABLE_SCAN_STATUSES = new Set([
+  "queued", "completed", "failed", "stopped", "cancelled",
+]);
+
+export function canDeleteScan(status: string): boolean {
+  return DELETABLE_SCAN_STATUSES.has(status);
 }
 
 export type VulnScanOut = {

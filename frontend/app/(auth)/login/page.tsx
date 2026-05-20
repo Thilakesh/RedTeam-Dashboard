@@ -1,12 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ApiError, api, setToken } from "@/lib/api";
+import { ApiError, API_URL, login } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { refresh } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -17,16 +18,13 @@ export default function LoginPage() {
     setBusy(true);
     setErr(null);
     try {
-      const res = await api<{ access_token: string }>("/auth/login", {
-        method: "POST",
-        auth: false,
-        body: JSON.stringify({ email, password }),
-      });
-      setToken(res.access_token);
-      router.push("/dashboard");
+      await login(email, password);
+      await refresh();
+      router.push("/home");
     } catch (e) {
       if (e instanceof ApiError) setErr(e.message);
-      else if (e instanceof TypeError) setErr("Cannot reach API at " + (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000") + " (CORS or network).");
+      else if (e instanceof TypeError)
+        setErr(`Cannot reach API at ${API_URL} (CORS or network).`);
       else setErr(e instanceof Error ? e.message : "Login failed");
     } finally {
       setBusy(false);
@@ -60,11 +58,8 @@ export default function LoginPage() {
       >
         {busy ? "Signing in..." : "Sign in"}
       </button>
-      <p className="text-sm text-neutral-400">
-        No account?{" "}
-        <Link href="/signup" className="text-emerald-400 hover:underline">
-          Sign up
-        </Link>
+      <p className="text-xs text-neutral-500">
+        Accounts are admin-created. If you don&apos;t have one, ask your administrator for an invite link.
       </p>
     </form>
   );

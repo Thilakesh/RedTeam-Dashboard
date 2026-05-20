@@ -1,11 +1,12 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Crosshair } from "lucide-react";
+import { Crosshair, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
-import { listWorkspaces } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { deleteWorkspace, listWorkspaces } from "@/lib/api";
 
 const STATUS_VARIANT: Record<
   string,
@@ -16,9 +17,16 @@ const STATUS_VARIANT: Record<
 };
 
 export default function TargetWorkspacesPage() {
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["workspaces"],
     queryFn: listWorkspaces,
+  });
+
+  const doDelete = useMutation({
+    mutationFn: (id: string) => deleteWorkspace(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workspaces"] }),
+    onError: (e) => alert((e as Error).message),
   });
 
   if (q.isLoading) {
@@ -125,12 +133,32 @@ export default function TargetWorkspacesPage() {
                       {new Date(r.created_at).toLocaleString()}
                     </td>
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/targets/${r.target_id}/workspace`}
-                        className="text-xs underline hover:text-foreground"
-                      >
-                        Open
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/targets/${r.target_id}/workspace`}
+                          className="text-xs underline hover:text-foreground"
+                        >
+                          Open
+                        </Link>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Delete workspace "${r.label}"? Removes all investigation tasks and findings.`,
+                              )
+                            ) {
+                              doDelete.mutate(r.id);
+                            }
+                          }}
+                          disabled={doDelete.isPending}
+                          title="Delete workspace"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

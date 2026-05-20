@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Activity, AlertCircle, AlertTriangle, CheckCircle2, Crosshair, Database, ExternalLink, Play, ShieldAlert, Square, Trash2 } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Crosshair, Database, ExternalLink, Play, ShieldAlert, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, createWorkspace, deleteScan, patchScan, startScan, stopScan, type Scan, type VulnScanOut } from "@/lib/api";
+import { api, canDeleteScan, createWorkspace, deleteScan, patchScan, startScan, stopScan, type Scan, type VulnScanOut } from "@/lib/api";
 
 const STATUS_CONFIG: Record<
   Scan["status"],
@@ -71,8 +71,6 @@ function ScanTableRow({ scan }: { scan: Scan }) {
 
   const cfg = STATUS_CONFIG[scan.status] ?? { label: scan.status, variant: "default" as const };
   const isActive = scan.status === "running" || scan.status === "created";
-  // Deep scans on unverified targets silently skip naabu/nmap/gowitness
-  const needsAuthzWarning = scan.profile === "deep" && !scan.target_authz_verified;
 
   return (
     <tr className="border-b border-border hover:bg-muted/30 transition-colors">
@@ -92,38 +90,18 @@ function ScanTableRow({ scan }: { scan: Scan }) {
       {/* Profile — editable only when queued */}
       <td className="px-4 py-3">
         {scan.status === "queued" ? (
-          <div className="flex items-center gap-1.5">
-            <Select value={scan.profile} onValueChange={(p) => doPatch.mutate(p)}>
-              <SelectTrigger className="h-7 w-28 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="quick">quick</SelectItem>
-                <SelectItem value="standard">standard</SelectItem>
-                <SelectItem value="deep">deep</SelectItem>
-              </SelectContent>
-            </Select>
-            {needsAuthzWarning && (
-              <span
-                title="Target not authorized for active scanning — naabu, nmap, and gowitness will be skipped. Go to Targets to verify ownership."
-                className="cursor-help"
-              >
-                <AlertTriangle className="h-4 w-4 text-warning" />
-              </span>
-            )}
-          </div>
+          <Select value={scan.profile} onValueChange={(p) => doPatch.mutate(p)}>
+            <SelectTrigger className="h-7 w-28 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="quick">quick</SelectItem>
+              <SelectItem value="standard">standard</SelectItem>
+              <SelectItem value="deep">deep</SelectItem>
+            </SelectContent>
+          </Select>
         ) : (
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-mono">{scan.profile}</span>
-            {needsAuthzWarning && (
-              <span
-                title="Target not authorized for active scanning — naabu, nmap, and gowitness were skipped. Go to Targets to verify ownership."
-                className="cursor-help"
-              >
-                <AlertTriangle className="h-4 w-4 text-warning" />
-              </span>
-            )}
-          </div>
+          <span className="text-sm font-mono">{scan.profile}</span>
         )}
       </td>
 
@@ -147,27 +125,15 @@ function ScanTableRow({ scan }: { scan: Scan }) {
       <td className="px-4 py-3">
         <div className="flex items-center gap-1.5">
           {scan.status === "queued" && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1 text-xs"
-                onClick={() => doStart.mutate()}
-                disabled={doStart.isPending}
-              >
-                <Play className="h-3 w-3" /> Start
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                onClick={() => doDelete.mutate()}
-                disabled={doDelete.isPending}
-                title="Delete"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 text-xs"
+              onClick={() => doStart.mutate()}
+              disabled={doStart.isPending}
+            >
+              <Play className="h-3 w-3" /> Start
+            </Button>
           )}
           {isActive && (
             <Button
@@ -243,6 +209,22 @@ function ScanTableRow({ scan }: { scan: Scan }) {
                 <Crosshair className="h-3 w-3" />
               )}
               {wsLaunching ? "Opening…" : "Target Investigation"}
+            </Button>
+          )}
+          {canDeleteScan(scan.status) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+              onClick={() => {
+                if (confirm(`Delete scan for ${scan.domain}? Removes all stages, assets observed by this scan, and any vuln matches.`)) {
+                  doDelete.mutate();
+                }
+              }}
+              disabled={doDelete.isPending}
+              title="Delete scan"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
           )}
         </div>

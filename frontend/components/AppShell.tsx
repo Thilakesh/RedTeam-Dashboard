@@ -17,10 +17,10 @@ import {
   Settings,
   ShieldAlert,
   Sun,
-  Target,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { clearToken, getToken } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,9 +35,10 @@ type NavItem = {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   children?: { href: string; label: string }[];
+  adminOnly?: boolean;
 };
 
-const NAV: NavItem[] = [
+const NAV_MAIN: NavItem[] = [
   { href: "/home", label: "Dashboard", icon: LayoutDashboard },
   {
     href: "/dashboard",
@@ -56,7 +57,31 @@ const NAV: NavItem[] = [
     children: [{ href: "/targets", label: "Assets" }],
   },
   { href: "/reports", label: "Reports", icon: FileBarChart2 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  {
+    href: "/settings",
+    label: "Settings",
+    icon: Settings,
+    children: [
+      { href: "/settings/profile", label: "Profile" },
+      { href: "/settings/sessions", label: "Sessions" },
+    ],
+  },
+];
+
+const NAV_ADMIN: NavItem[] = [
+  {
+    href: "/admin",
+    label: "Administration",
+    icon: Users,
+    adminOnly: true,
+    children: [
+      { href: "/admin/users", label: "Users" },
+      { href: "/admin/sessions", label: "Sessions" },
+      { href: "/admin/features", label: "Feature Controls" },
+      { href: "/admin/settings", label: "System Settings" },
+      { href: "/admin/audit", label: "Change Logs" },
+    ],
+  },
 ];
 
 function buildBreadcrumb(pathname: string): string[] {
@@ -77,41 +102,44 @@ function buildBreadcrumb(pathname: string): string[] {
     return ["Target Workspace", "Risk View"];
   if (pathname === "/targets") return ["Target Workspace", "Assets"];
   if (pathname === "/reports") return ["Reports"];
-  if (pathname === "/settings") return ["Settings"];
+  if (pathname.startsWith("/settings")) return ["Settings", ...pathname.split("/").slice(2).map(cap)];
+  if (pathname.startsWith("/admin")) return ["Administration", ...pathname.split("/").slice(2).map(cap)];
   const parts = pathname.split("/").filter(Boolean);
-  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1));
+  return parts.map(cap);
+}
+
+function cap(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const { user, loading, isAdmin, logout } = useAuth();
 
   useEffect(() => {
-    const ok = !!getToken();
-    setAuthed(ok);
-    if (!ok) router.replace("/login");
-  }, [router]);
+    if (!loading && !user) router.replace("/login");
+  }, [loading, user, router]);
 
-  if (authed === null) {
+  if (loading || !user) {
     return <div className="min-h-screen bg-background" />;
   }
-  if (!authed) return null;
 
   const crumbs = buildBreadcrumb(pathname || "/");
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <Sidebar pathname={pathname || "/"} />
-      <div className="flex-1 flex flex-col min-w-0">
-        <TopBar crumbs={crumbs} onLogout={() => { clearToken(); router.replace("/login"); }} />
-        <main className="flex-1 px-8 py-6 overflow-x-auto scrollbar-thin">{children}</main>
+    <div className="h-screen overflow-hidden bg-background flex">
+      <Sidebar pathname={pathname || "/"} isAdmin={isAdmin} />
+      <div className="flex-1 flex flex-col min-w-0 h-screen">
+        <TopBar crumbs={crumbs} email={user.email} role={user.role} onLogout={logout} />
+        <main className="flex-1 px-8 py-6 overflow-auto scrollbar-thin">{children}</main>
       </div>
     </div>
   );
 }
 
-function Sidebar({ pathname }: { pathname: string }) {
+function Sidebar({ pathname, isAdmin }: { pathname: string; isAdmin: boolean }) {
+  const { user } = useAuth();
   return (
     <aside className="w-60 shrink-0 bg-sidebar text-sidebar-foreground border-r border-black/30 flex flex-col">
       <div className="px-5 h-16 flex items-center gap-2 border-b border-white/5">
@@ -121,12 +149,22 @@ function Sidebar({ pathname }: { pathname: string }) {
         <span className="font-semibold text-white text-[15px] tracking-tight">Recon Dashboard</span>
       </div>
       <div className="px-3 py-3 text-xxs uppercase tracking-wider text-white/40">Main</div>
-      <nav className="flex-1 px-2 space-y-0.5">
-        {NAV.map((item) => (
+      <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
+        {NAV_MAIN.map((item) => (
           <NavRow key={item.href} item={item} pathname={pathname} />
         ))}
+        {isAdmin && (
+          <>
+            <div className="px-3 pt-4 pb-2 text-xxs uppercase tracking-wider text-white/40">
+              Admin
+            </div>
+            {NAV_ADMIN.map((item) => (
+              <NavRow key={item.href} item={item} pathname={pathname} />
+            ))}
+          </>
+        )}
       </nav>
-      <UserChip />
+      <UserChip email={user?.email ?? ""} role={user?.role ?? "analyst"} />
     </aside>
   );
 }
@@ -176,16 +214,17 @@ function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
   );
 }
 
-function UserChip() {
+function UserChip({ email, role }: { email: string; role: string }) {
+  const initial = (email || "?").trim()[0]?.toUpperCase() ?? "?";
   return (
     <div className="border-t border-white/5 p-3">
       <div className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-white/5">
         <div className="h-8 w-8 rounded-full bg-primary/30 text-white text-sm flex items-center justify-center font-medium">
-          A
+          {initial}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-white truncate">admin</div>
-          <div className="text-xxs text-white/50">Administrator</div>
+          <div className="text-sm font-medium text-white truncate">{email || "—"}</div>
+          <div className="text-xxs text-white/50 capitalize">{role}</div>
         </div>
       </div>
     </div>
@@ -194,11 +233,16 @@ function UserChip() {
 
 function TopBar({
   crumbs,
+  email,
+  role,
   onLogout,
 }: {
   crumbs: string[];
+  email: string;
+  role: string;
   onLogout: () => void;
 }) {
+  const initial = (email || "?").trim()[0]?.toUpperCase() ?? "?";
   return (
     <header className="h-16 px-8 flex items-center justify-between border-b border-border bg-background">
       <nav className="flex items-center gap-2 text-sm">
@@ -222,13 +266,20 @@ function TopBar({
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 h-9 px-1 rounded-md hover:bg-accent">
-            <div className="h-7 w-7 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-semibold">A</div>
-            <span className="hidden md:inline text-sm font-medium pr-2">admin</span>
+            <div className="h-7 w-7 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-semibold">{initial}</div>
+            <span className="hidden md:inline text-sm font-medium pr-2 capitalize">{role}</span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuLabel>Signed in</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="truncate">{email}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onLogout}>Sign out</DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/settings/profile">Profile</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/settings/sessions">Sessions</Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void onLogout()}>Sign out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

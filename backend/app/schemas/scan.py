@@ -38,7 +38,6 @@ class ScanOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     error: str | None
-    target_authz_verified: bool = False  # True when target.authorization_verified_at is not None
 
     class Config:
         from_attributes = True

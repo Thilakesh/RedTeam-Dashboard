@@ -1,7 +1,7 @@
 """gowitness — screenshot capture for live HTTP/HTTPS services.
 
-Active stage: authz_required=True. Takes subdomains as input, builds http/https URLs,
-runs gowitness in batch mode, uploads screenshots to MinIO, returns screenshot assets.
+Takes subdomains as input, builds http/https URLs, runs gowitness in batch mode,
+uploads screenshots to MinIO, returns screenshot assets.
 
 Screenshot asset: type="screenshot", canonical_key=FQDN (e.g. "api.example.com"),
 payload={"screenshot_url": "...", "url": "https://api.example.com"}.
@@ -27,7 +27,6 @@ class GoWitnessStage:
     depends_on = ["httpx"]
     weight = 50
     optional = True
-    authz_required = True
 
     _MAX_HOSTS = 50
 

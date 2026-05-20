@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +39,7 @@ from app.schemas.vuln import (
     VulnsPage,
     VulnStatusUpdateRequest,
 )
-from app.services import vuln_view
+from app.services import audit, vuln_view
 from app.services.queue import enqueue_vuln_scan
 
 router = APIRouter(prefix="/vuln-scans", tags=["vuln-scans"])
@@ -62,17 +62,19 @@ def _to_vuln_scan_out(scan: Scan, target_domain: str) -> VulnScanOut:
 
 
 async def _get_vuln_scan(
-    db: AsyncSession, scan_id: UUID, org_id: UUID
+    db: AsyncSession, scan_id: UUID, user: CurrentUser
 ) -> tuple[Scan, str]:
-    """Returns (scan, target_domain). Raises 404 if not found or wrong org."""
+    """Returns (scan, target_domain). 404 if not found, wrong org, or not
+    visible to this user under scan_filter (analyst sees own, admin sees all)."""
     row = (
         await db.execute(
             select(Scan, Target.domain)
             .join(Target, Target.id == Scan.target_id)
             .where(
                 Scan.id == scan_id,
-                Scan.org_id == org_id,
+                Scan.org_id == user.org_id,
                 Scan.kind == ScanKind.vuln_analysis,
+                user.scan_filter(Scan.created_by),
             )
         )
     ).first()
@@ -113,6 +115,7 @@ async def create_vuln_scan(
         parent_scan_id=parent_scan.id,
         target_id=parent_scan.target_id,
         org_id=user.org_id,
+        created_by=user.id,
         profile=req.profile,
         intrusive=req.intrusive,
         status=ScanStatus.created,
@@ -138,6 +141,7 @@ async def list_vuln_scans(
             .where(
                 Scan.org_id == user.org_id,
                 Scan.kind == ScanKind.vuln_analysis,
+                user.scan_filter(Scan.created_by),
             )
             .order_by(desc(Scan.created_at))
             .limit(100)
@@ -159,6 +163,7 @@ async def get_vuln_scan(
             Scan.id == scan_id,
             Scan.org_id == user.org_id,
             Scan.kind == ScanKind.vuln_analysis,
+            user.scan_filter(Scan.created_by),
         )
     )
     if scan is None:
@@ -168,6 +173,47 @@ async def get_vuln_scan(
     target_domain = target.domain if target else ""
     base = _to_vuln_scan_out(scan, target_domain)
     return VulnScanDetailOut(**base.model_dump(), stages=scan.stages)
+
+
+@router.delete("/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_vuln_scan(
+    scan_id: UUID,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete any non-in-flight vuln scan. Cascade kills stages, vuln_evidence
+    rows, and vuln_run_matches for this scan."""
+    scan, domain = await _get_vuln_scan(db, scan_id, user)
+    if scan.status in (ScanStatus.created, ScanStatus.running):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "stop the scan before deleting"
+        )
+
+    settings = get_settings()
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        await redis.publish(
+            f"scan:{scan_id}",
+            json.dumps({"event": "scan.deleted", "scan_id": str(scan_id)}),
+        )
+    finally:
+        await redis.aclose()
+
+    status_at_delete = scan.status.value
+    profile = scan.profile
+    await db.delete(scan)
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="vuln_scan.deleted",
+        target_type="scan",
+        target_id=scan_id,
+        meta={"domain": domain, "profile": profile, "status_at_delete": status_at_delete},
+        request=request,
+        commit=False,
+    )
+    await db.commit()
 
 
 @router.get("/{scan_id}/stream")
@@ -181,6 +227,7 @@ async def stream_vuln_scan(
             Scan.id == scan_id,
             Scan.org_id == user.org_id,
             Scan.kind == ScanKind.vuln_analysis,
+            user.scan_filter(Scan.created_by),
         )
     )
     if exists is None:
@@ -222,7 +269,7 @@ async def get_vuln_overview(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VulnOverview:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     data = await vuln_view.build_vuln_overview(db, scan_id)
     return VulnOverview(**data)
 
@@ -239,7 +286,7 @@ async def list_vuln_scan_vulnerabilities(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VulnsPage:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     total, rows = await vuln_view.build_vuln_rows(
         db,
         scan_id,
@@ -302,7 +349,7 @@ async def get_vuln_diff(
     db: AsyncSession = Depends(get_db),
 ) -> VulnDiffOut:
     """Diff vs previous completed vuln scan: new / seen / fixed_in_this_run."""
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     data = await vuln_view.build_vuln_diff(db, scan_id)
     return VulnDiffOut(
         counts=data["counts"],
@@ -319,7 +366,7 @@ async def get_vulns_by_service(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ByServiceResponse:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     rows_data = await vuln_view.build_by_service(db, scan_id)
     rows = [ByServiceRow(**r) for r in rows_data]
     return ByServiceResponse(rows=rows)
@@ -331,7 +378,7 @@ async def get_vulns_by_technology(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ByTechResponse:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     rows_data = await vuln_view.build_by_technology(db, scan_id)
     rows = [ByTechRow(**r) for r in rows_data]
     return ByTechResponse(rows=rows)
@@ -348,7 +395,7 @@ async def list_scan_endpoints(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EndpointsPage:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     total, endpoints = await vuln_view.build_endpoint_rows(
         db, scan_id,
         is_login=is_login,
@@ -387,7 +434,7 @@ async def get_endpoint_detail(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EndpointDetail:
-    scan, _ = await _get_vuln_scan(db, scan_id, user.org_id)
+    scan, _ = await _get_vuln_scan(db, scan_id, user)
     ep = await db.scalar(
         select(Endpoint).where(
             Endpoint.id == endpoint_id,
@@ -421,7 +468,7 @@ async def get_tls_view(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TlsResponse:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     rows_data = await vuln_view.build_tls_view(db, scan_id)
     rows = [TlsRow(**r) for r in rows_data]
     return TlsResponse(rows=rows)
@@ -433,7 +480,7 @@ async def get_hvts(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> HvtResponse:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     rows_data = await vuln_view.build_hvt_rows(db, scan_id)
     rows = [
         HvtRow(
@@ -453,7 +500,7 @@ async def get_triage(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TriageResponse:
-    await _get_vuln_scan(db, scan_id, user.org_id)
+    await _get_vuln_scan(db, scan_id, user)
     data = await vuln_view.build_triage_view(db, scan_id)
     rows = [TriageVulnRow(**r) for r in data["rows"]]
     return TriageResponse(rows=rows, total_with_risk_score=data["total_with_risk_score"])
