@@ -13,6 +13,7 @@ import {
   Moon,
   Plus,
   Radar,
+  Rocket,
   ScanSearch,
   Settings,
   ShieldAlert,
@@ -55,6 +56,15 @@ const NAV_MAIN: NavItem[] = [
     label: "Target Workspace",
     icon: Crosshair,
     children: [{ href: "/targets", label: "Assets" }],
+  },
+  {
+    href: "/operations",
+    label: "Operations",
+    icon: Rocket,
+    children: [
+      { href: "/operations/launch", label: "Launch Operation" },
+      { href: "/operations", label: "Operation History" },
+    ],
   },
   { href: "/reports", label: "Reports", icon: FileBarChart2 },
   {
@@ -101,6 +111,9 @@ function buildBreadcrumb(pathname: string): string[] {
   if (pathname.match(/^\/targets\/[^/]+\/risk$/))
     return ["Target Workspace", "Risk View"];
   if (pathname === "/targets") return ["Target Workspace", "Assets"];
+  if (pathname === "/operations/launch") return ["Operations", "Launch Operation"];
+  if (pathname === "/operations") return ["Operations", "Operation History"];
+  if (pathname.match(/^\/operations\/[^/]+$/)) return ["Operations", "Operation History", "Result"];
   if (pathname === "/reports") return ["Reports"];
   if (pathname.startsWith("/settings")) return ["Settings", ...pathname.split("/").slice(2).map(cap)];
   if (pathname.startsWith("/admin")) return ["Administration", ...pathname.split("/").slice(2).map(cap)];

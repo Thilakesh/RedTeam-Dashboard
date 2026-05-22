@@ -708,3 +708,91 @@ export async function getInvestigationTask(
     `/target-workspaces/${workspace_id}/tasks/${task_id}`,
   );
 }
+
+// --- Operations Console (standalone manual ops) ------------------------------
+
+export type OperationStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type Operation = {
+  id: string;
+  target: string;
+  target_type: string;
+  tool: string;
+  profile: string | null;
+  protocol: string | null;
+  custom_args: string | null;
+  generated_command: string | null;
+  status: OperationStatus;
+  progress_pct: number;
+  duration_s: number | null;
+  raw_output_present: boolean;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type OperationsResponse = { rows: Operation[] };
+
+export type OperationFinding = {
+  id: string;
+  operation_id: string;
+  kind: string;
+  severity: string;
+  title: string;
+  description: string | null;
+  evidence: Record<string, unknown>;
+  created_at: string;
+};
+
+export type OperationDetail = {
+  operation: Operation;
+  findings: OperationFinding[];
+  raw_output: string | null;
+};
+
+export type OperationRequest = {
+  target_type: "domain" | "ipv4";
+  target: string;
+  tool: string;
+  profile?: string | null;
+  protocol?: "http" | "https" | null;
+  custom_args?: string | null;
+};
+
+export async function previewOperation(
+  body: OperationRequest,
+): Promise<{ generated_command: string }> {
+  return api<{ generated_command: string }>("/operations/preview", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createOperation(body: OperationRequest): Promise<Operation> {
+  return api<Operation>("/operations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listOperations(): Promise<OperationsResponse> {
+  return api<OperationsResponse>("/operations");
+}
+
+export async function getOperation(operation_id: string): Promise<OperationDetail> {
+  return api<OperationDetail>(`/operations/${operation_id}`);
+}
+
+export async function cancelOperation(operation_id: string): Promise<Operation> {
+  return api<Operation>(`/operations/${operation_id}/cancel`, { method: "POST" });
+}
+
+export async function retryOperation(operation_id: string): Promise<Operation> {
+  return api<Operation>(`/operations/${operation_id}/retry`, { method: "POST" });
+}

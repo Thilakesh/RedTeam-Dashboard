@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.api import (
     auth,
+    operations as operations_api,
     scans,
     sessions as sessions_api,
     settings as settings_api,
@@ -49,6 +50,7 @@ app.include_router(targets.router)
 app.include_router(vuln_scans.router)
 app.include_router(vulns.router)
 app.include_router(target_workspaces.router)
+app.include_router(operations_api.router)
 
 
 @app.get("/health")

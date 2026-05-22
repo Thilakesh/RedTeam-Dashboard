@@ -11,6 +11,7 @@ from app.models.investigation_task import (
     InvestigationTask,
     InvestigationTaskStatus,
 )
+from app.models.operation import Operation, OperationFinding, OperationStatus
 from app.models.org import Organization, Project, Target
 from app.models.scan import Scan, ScanKind, ScanStage, ScanStatus, StageStatus
 from app.models.service import Service, ServiceClassification
@@ -38,6 +39,9 @@ __all__ = [
     "InvestigationFinding",
     "InvestigationTask",
     "InvestigationTaskStatus",
+    "Operation",
+    "OperationFinding",
+    "OperationStatus",
     "Organization",
     "Project",
     "RefreshSession",

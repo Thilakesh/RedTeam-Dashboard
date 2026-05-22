@@ -33,3 +33,13 @@ async def enqueue_investigation_task(task_id: str) -> None:
         )
     finally:
         await pool.close()
+
+
+async def enqueue_operation(operation_id: str) -> None:
+    pool = await create_pool(_redis_settings())
+    try:
+        await pool.enqueue_job(
+            "run_operation", operation_id, _queue_name="investigation"
+        )
+    finally:
+        await pool.close()
