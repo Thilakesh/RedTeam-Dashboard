@@ -17,6 +17,7 @@ from app.api import (
     vulns,
 )
 from app.api.admin import audit as admin_audit
+from app.api.admin import settings as admin_settings
 from app.api.middleware.csrf import CSRFMiddleware
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -45,6 +46,7 @@ app.include_router(users_api.router)
 app.include_router(sessions_api.router)
 app.include_router(settings_api.router)
 app.include_router(admin_audit.router)
+app.include_router(admin_settings.router)
 app.include_router(scans.router)
 app.include_router(targets.router)
 app.include_router(vuln_scans.router)

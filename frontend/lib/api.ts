@@ -796,3 +796,46 @@ export async function cancelOperation(operation_id: string): Promise<Operation> 
 export async function retryOperation(operation_id: string): Promise<Operation> {
   return api<Operation>(`/operations/${operation_id}/retry`, { method: "POST" });
 }
+
+// --- Admin: OpenRouter settings ----------------------------------------------
+
+export type OpenRouterSettings = {
+  api_key_set: boolean;
+  api_key_hint: string | null;
+  default_model: string;
+};
+
+export type OpenRouterTestResult = {
+  status: "connected" | "invalid_key" | "connection_failed";
+  detail: string | null;
+};
+
+export const OPENROUTER_PRESET_MODELS = [
+  "openai/gpt-4o",
+  "anthropic/claude-3.7-sonnet",
+  "google/gemini-2.5-pro",
+];
+
+export async function getOpenRouterSettings(): Promise<OpenRouterSettings> {
+  return api<OpenRouterSettings>("/admin/settings/openrouter");
+}
+
+export async function updateOpenRouterSettings(body: {
+  api_key?: string | null;
+  default_model?: string | null;
+}): Promise<OpenRouterSettings> {
+  return api<OpenRouterSettings>("/admin/settings/openrouter", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function testOpenRouterConnection(body: {
+  api_key?: string | null;
+  default_model?: string | null;
+}): Promise<OpenRouterTestResult> {
+  return api<OpenRouterTestResult>("/admin/settings/openrouter/test", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}

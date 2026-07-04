@@ -27,6 +27,7 @@ from app.models.ai_usage import AiUsage
 from app.models.finding import Finding, FindingSeverity
 from app.pipeline.stage import AssetRecord, StageContext
 from app.services.scan_view import build_port_rows, build_subdomain_rows
+from app.services.system_settings import get_openrouter_config
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,6 @@ Ranking criteria (highest weight first):
 Every asset in the input MUST appear in the output exactly once.
 Severity should reflect genuine risk: not everything is HIGH or MED."""
 
-# Model to call via OpenRouter.
-_MODEL = "openai/gpt-oss-20b:free"
-
 
 class RiskPrioritizerStage:
     """Ranks all subdomain assets for a scan by attack-surface risk."""
@@ -82,6 +80,8 @@ class RiskPrioritizerStage:
         async with SessionLocal() as db:
             subdomain_rows = await build_subdomain_rows(db, ctx.scan_id)
             port_rows = await build_port_rows(db, ctx.scan_id)
+            # Admin-configured OpenRouter key/model (DB-first, env/default fallback).
+            or_api_key, or_model = await get_openrouter_config(db)
 
         if not subdomain_rows:
             logger.info("risk_prioritizer: no subdomain rows for scan %s — skipping", ctx.scan_id)
@@ -122,7 +122,8 @@ class RiskPrioritizerStage:
         result = await bounded_completion(
             system=SYSTEM_PROMPT,
             user=json.dumps(asset_list),
-            model=_MODEL,
+            model=or_model,
+            api_key=or_api_key,
             max_input_chars=40_000,
             timeout=120.0,
         )
@@ -193,7 +194,7 @@ class RiskPrioritizerStage:
                 AiUsage(
                     id=uuid4(),
                     scan_id=ctx.scan_id,
-                    model=_MODEL,
+                    model=or_model,
                     prompt_tokens=result.prompt_tokens,
                     completion_tokens=result.completion_tokens,
                 )

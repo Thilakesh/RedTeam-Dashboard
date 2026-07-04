@@ -15,6 +15,7 @@ from app.models.operation import Operation, OperationFinding, OperationStatus
 from app.models.org import Organization, Project, Target
 from app.models.scan import Scan, ScanKind, ScanStage, ScanStatus, StageStatus
 from app.models.service import Service, ServiceClassification
+from app.models.system_setting import SystemSetting
 from app.models.target_workspace import TargetWorkspace, WorkspaceStatus
 from app.models.technology import Technology
 from app.models.tls_observation import TlsObservation
@@ -52,6 +53,7 @@ __all__ = [
     "Service",
     "ServiceClassification",
     "StageStatus",
+    "SystemSetting",
     "Target",
     "TargetWorkspace",
     "Technology",
