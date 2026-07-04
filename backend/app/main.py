@@ -6,16 +6,16 @@ from sqlalchemy import select
 
 from app.api import (
     auth,
+    operations as operations_api,
     scans,
     sessions as sessions_api,
     settings as settings_api,
     target_workspaces,
     targets,
     users as users_api,
-    vuln_scans,
-    vulns,
 )
 from app.api.admin import audit as admin_audit
+from app.api.admin import settings as admin_settings
 from app.api.middleware.csrf import CSRFMiddleware
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -44,11 +44,11 @@ app.include_router(users_api.router)
 app.include_router(sessions_api.router)
 app.include_router(settings_api.router)
 app.include_router(admin_audit.router)
+app.include_router(admin_settings.router)
 app.include_router(scans.router)
 app.include_router(targets.router)
-app.include_router(vuln_scans.router)
-app.include_router(vulns.router)
 app.include_router(target_workspaces.router)
+app.include_router(operations_api.router)
 
 
 @app.get("/health")

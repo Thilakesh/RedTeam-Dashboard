@@ -23,7 +23,6 @@ from app.models import (
     Asset,
     InvestigationTaskStatus,
     Scan,
-    ScanKind,
     ScanStatus,
     Target,
     TargetWorkspace,
@@ -106,7 +105,6 @@ async def create_workspace(
             .where(
                 Scan.id == req.parent_scan_id,
                 Scan.org_id == user.org_id,
-                Scan.kind == ScanKind.recon,
             )
         )
     ).first()

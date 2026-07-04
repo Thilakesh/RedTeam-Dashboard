@@ -7,7 +7,7 @@ PUT /users/{id}/features/{name}.
 Caching: 30-second TTL in-process LRU keyed by (user_id, feature_name).
 Invalidation: writes call invalidate_user(user_id) directly, which also
 publishes on Redis pubsub channel `features:invalidate:{user_id}` so other
-workers (Arq, vuln, investigation) drop their caches too.
+workers (Arq, investigation) drop their caches too.
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ FEATURES = frozenset(
         "dirsearch",
         "nmap",
         "naabu",
-        "vulnerability_analysis",
         "target_workspace",
         "investigations",
         "export_reports",

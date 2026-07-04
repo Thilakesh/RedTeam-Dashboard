@@ -23,6 +23,9 @@ from app.models import (
     InvestigationFinding,
     InvestigationTask,
     InvestigationTaskStatus,
+    Operation,
+    OperationFinding,
+    OperationStatus,
     Target,
     TargetWorkspace,
 )
@@ -32,6 +35,7 @@ from app.pipeline.investigation.stage import (
     TaskContext,
 )
 from app.services import investigation_tasks as task_service
+from app.services import operations as operation_service
 from app.services.endpoint_enrichment import upsert_endpoint_enrichment
 from app.services.service_enrichment import upsert_service_enrichment
 from app.services.tls import insert_tls_observation
@@ -170,8 +174,99 @@ async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
         await redis.aclose()
 
 
+async def _publish_operation(redis: Redis, operation_id: UUID, event: str, **fields) -> None:
+    payload = {"event": event, "operation_id": str(operation_id), **fields}
+    await redis.publish(f"operation:{operation_id}", json.dumps(payload, default=str))
+
+
+async def run_operation(_ctx: dict, operation_id_str: str) -> None:
+    """Run one standalone Operation: reuse the investigation adapters against a
+    hand-typed target. Persists ONLY operation_findings + raw_output (no recon
+    asset-graph enrichment)."""
+    operation_id = UUID(operation_id_str)
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+
+    try:
+        async with SessionLocal() as db:
+            op = await db.get(Operation, operation_id)
+            if op is None:
+                raise RuntimeError(f"operation {operation_id} not found")
+
+            # Cancel start-guard: cancelled before the worker picked it up.
+            if op.status == OperationStatus.cancelled.value:
+                return
+
+            adapter = get_adapter(op.tool)
+            if adapter is None:
+                raise RuntimeError(f"no adapter registered for tool '{op.tool}'")
+
+            operation_service.mark_started(op)
+            await db.commit()
+
+            ctx = TaskContext(
+                task_id=op.id,
+                workspace_id=None,
+                target_id=None,
+                target_domain=op.target,
+                asset_id=None,
+                asset_canonical_key=op.target,
+                asset_type=op.target_type,
+                params={
+                    "profile": op.profile,
+                    "protocol": op.protocol,
+                    "custom_args": op.custom_args,
+                },
+            )
+
+        await _publish_operation(redis, operation_id, "operation.started")
+
+        result = await adapter.execute(ctx)
+
+        # Cancel completion-guard: discard if cancelled mid-run.
+        async with SessionLocal() as db:
+            fresh = await db.get(Operation, operation_id)
+            if fresh is None:
+                return
+            if fresh.status == OperationStatus.cancelled.value:
+                await _publish_operation(redis, operation_id, "operation.cancelled")
+                return
+            for f in result.findings:
+                db.add(
+                    OperationFinding(
+                        operation_id=operation_id,
+                        kind=f.kind,
+                        severity=f.severity,
+                        title=f.title[:200],
+                        description=f.description,
+                        evidence=f.evidence or {},
+                    )
+                )
+            operation_service.mark_completed(fresh, result.raw_output)
+            await db.commit()
+
+        await _publish_operation(
+            redis, operation_id, "operation.completed",
+            findings_count=len(result.findings),
+        )
+
+    except Exception as exc:
+        async with SessionLocal() as db:
+            fresh = await db.get(Operation, operation_id)
+            if fresh is not None and fresh.status not in (
+                OperationStatus.completed.value,
+                OperationStatus.failed.value,
+                OperationStatus.cancelled.value,
+            ):
+                operation_service.mark_failed(fresh, str(exc))
+                await db.commit()
+        await _publish_operation(redis, operation_id, "operation.failed", error=str(exc)[:500])
+        raise
+    finally:
+        await redis.aclose()
+
+
 class InvestigationWorkerSettings:
-    functions = [run_investigation_task]
+    functions = [run_investigation_task, run_operation]
     queue_name = "investigation"
     job_timeout = 60 * 15  # 15 min — longest tool here (nmap_deep) caps at 600s
     max_jobs = 6

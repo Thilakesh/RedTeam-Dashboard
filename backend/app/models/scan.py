@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,11 +26,6 @@ class StageStatus(str, enum.Enum):
     skipped = "skipped"
 
 
-class ScanKind(str, enum.Enum):
-    recon = "recon"
-    vuln_analysis = "vuln_analysis"
-
-
 class Scan(Base):
     __tablename__ = "scans"
 
@@ -45,15 +40,6 @@ class Scan(Base):
         nullable=True,
         index=True,
     )
-    kind: Mapped[ScanKind] = mapped_column(
-        Enum(ScanKind, name="scan_kind", create_type=False),
-        nullable=False,
-        server_default="recon",
-    )
-    parent_scan_id: Mapped[UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), nullable=True
-    )
-    intrusive: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     profile: Mapped[str] = mapped_column(String(20), default="quick")
     status: Mapped[ScanStatus] = mapped_column(
         Enum(ScanStatus, name="scan_status"), default=ScanStatus.created

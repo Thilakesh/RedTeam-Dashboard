@@ -30,6 +30,7 @@ async def bounded_completion(
     system: str,
     user: str,
     model: str = "openai/gpt-oss-20b:free",
+    api_key: str | None = None,
     max_input_chars: int = 40_000,
     timeout: float = 120.0,
 ) -> CompletionResult:
@@ -42,7 +43,7 @@ async def bounded_completion(
     Returns CompletionResult on success.
     Raises BoundedCompletionError on HTTP error, timeout, or empty API key.
     """
-    api_key = get_settings().openrouter_api_key
+    api_key = api_key or get_settings().openrouter_api_key
     if not api_key:
         raise BoundedCompletionError(
             "OPENROUTER_API_KEY is not set — cannot call risk prioritizer"

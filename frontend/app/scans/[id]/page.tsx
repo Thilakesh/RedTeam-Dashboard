@@ -23,7 +23,6 @@ import {
   sseUrl,
   type ScanDetail,
   type ScanOverview,
-  type VulnScanOut,
 } from "@/lib/api";
 
 const SSE_EVENTS = [
@@ -50,7 +49,6 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
   const rawTab = searchParams.get("tab");
   const defaultTab = rawTab && VALID_TABS.includes(rawTab) ? rawTab : "subdomains";
 
-  const [vulnLaunching, setVulnLaunching] = useState(false);
   const [wsLaunching, setWsLaunching] = useState(false);
 
   const doDelete = useMutation({
@@ -144,34 +142,6 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
             <Button
               variant="outline"
               size="sm"
-              disabled={vulnLaunching}
-              onClick={async () => {
-                setVulnLaunching(true);
-                try {
-                  const result = await api<VulnScanOut>("/vuln-scans", {
-                    method: "POST",
-                    body: JSON.stringify({
-                      parent_scan_id: params.id,
-                      profile: "vuln_quick",
-                    }),
-                  });
-                  router.push(`/vuln-scans/${result.id}`);
-                } catch (err) {
-                  console.error("Failed to start vuln scan:", err);
-                  setVulnLaunching(false);
-                }
-              }}
-            >
-              {vulnLaunching ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : null}
-              Run Vulnerability Analysis
-            </Button>
-          )}
-          {s.status === "completed" && (
-            <Button
-              variant="outline"
-              size="sm"
               disabled={wsLaunching}
               onClick={async () => {
                 setWsLaunching(true);
@@ -204,7 +174,7 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
               size="sm"
               className="text-destructive hover:text-destructive"
               onClick={() => {
-                if (confirm(`Delete this scan for ${s.domain}? Removes all stages, assets observed by this scan, and any vuln matches.`)) {
+                if (confirm(`Delete this scan for ${s.domain}? Removes all stages and assets observed by this scan.`)) {
                   doDelete.mutate();
                 }
               }}

@@ -16,10 +16,10 @@ from uuid import UUID
 @dataclass
 class TaskContext:
     task_id: UUID
-    workspace_id: UUID
-    target_id: UUID
+    workspace_id: UUID | None
+    target_id: UUID | None
     target_domain: str
-    asset_id: UUID
+    asset_id: UUID | None
     asset_canonical_key: str
     asset_type: str
     params: dict

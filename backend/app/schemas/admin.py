@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -95,3 +96,26 @@ class SystemSettingsPatchRequest(BaseModel):
     """Only mutable knobs surfaced for now; everything else is env-controlled."""
 
     bbot_timeout: int | None = Field(default=None, ge=60, le=14400)
+
+
+class OpenRouterSettingsOut(BaseModel):
+    """Never includes the raw API key — only whether one is set + a last-4 hint."""
+
+    api_key_set: bool
+    api_key_hint: str | None = None
+    default_model: str
+
+
+class OpenRouterSettingsUpdateRequest(BaseModel):
+    api_key: str | None = Field(default=None, max_length=300)
+    default_model: str | None = Field(default=None, max_length=120)
+
+
+class OpenRouterTestRequest(BaseModel):
+    api_key: str | None = Field(default=None, max_length=300)
+    default_model: str | None = Field(default=None, max_length=120)
+
+
+class OpenRouterTestResponse(BaseModel):
+    status: Literal["connected", "invalid_key", "connection_failed"]
+    detail: str | None = None
