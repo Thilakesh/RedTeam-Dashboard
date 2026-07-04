@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Activity, AlertCircle, CheckCircle2, Crosshair, Database, ExternalLink, Play, ShieldAlert, Square, Trash2 } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Crosshair, Database, ExternalLink, Play, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, canDeleteScan, createWorkspace, deleteScan, patchScan, startScan, stopScan, type Scan, type VulnScanOut } from "@/lib/api";
+import { api, canDeleteScan, createWorkspace, deleteScan, patchScan, startScan, stopScan, type Scan } from "@/lib/api";
 
 const STATUS_CONFIG: Record<
   Scan["status"],
@@ -66,7 +66,6 @@ function ScanTableRow({ scan }: { scan: Scan }) {
     mutationFn: (p: string) => patchScan(scan.id, p),
     onSuccess: invalidate,
   });
-  const [vulnLaunching, setVulnLaunching] = useState(false);
   const [wsLaunching, setWsLaunching] = useState(false);
 
   const cfg = STATUS_CONFIG[scan.status] ?? { label: scan.status, variant: "default" as const };
@@ -160,37 +159,6 @@ function ScanTableRow({ scan }: { scan: Scan }) {
               size="sm"
               variant="outline"
               className="h-7 gap-1 text-xs"
-              disabled={vulnLaunching}
-              onClick={async () => {
-                setVulnLaunching(true);
-                try {
-                  const result = await api<VulnScanOut>("/vuln-scans", {
-                    method: "POST",
-                    body: JSON.stringify({
-                      parent_scan_id: scan.id,
-                      profile: "vuln_quick",
-                    }),
-                  });
-                  router.push(`/vuln-scans/${result.id}`);
-                } catch (err) {
-                  console.error("Failed to start vuln scan:", err);
-                  setVulnLaunching(false);
-                }
-              }}
-            >
-              {vulnLaunching ? (
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : (
-                <ShieldAlert className="h-3 w-3" />
-              )}
-              {vulnLaunching ? "Starting…" : "Run Vuln Analysis"}
-            </Button>
-          )}
-          {scan.status === "completed" && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 text-xs"
               disabled={wsLaunching}
               onClick={async () => {
                 setWsLaunching(true);
@@ -217,7 +185,7 @@ function ScanTableRow({ scan }: { scan: Scan }) {
               variant="ghost"
               className="h-7 w-7 p-0 text-destructive hover:text-destructive"
               onClick={() => {
-                if (confirm(`Delete scan for ${scan.domain}? Removes all stages, assets observed by this scan, and any vuln matches.`)) {
+                if (confirm(`Delete scan for ${scan.domain}? Removes all stages and assets observed by this scan.`)) {
                   doDelete.mutate();
                 }
               }}

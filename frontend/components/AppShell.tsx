@@ -16,7 +16,6 @@ import {
   Rocket,
   ScanSearch,
   Settings,
-  ShieldAlert,
   Sun,
   Users,
 } from "lucide-react";
@@ -50,7 +49,6 @@ const NAV_MAIN: NavItem[] = [
       { href: "/dashboard/recon-jobs", label: "Recon Jobs" },
     ],
   },
-  { href: "/vuln-scans", label: "Vulnerability Scans", icon: ShieldAlert },
   {
     href: "/targets",
     label: "Target Workspace",
@@ -99,17 +97,10 @@ function buildBreadcrumb(pathname: string): string[] {
   if (pathname === "/dashboard") return ["Basic Recon", "Add Scan"];
   if (pathname === "/dashboard/recon-jobs") return ["Basic Recon", "Recon Jobs"];
   if (pathname.startsWith("/scans/")) return ["Scan Detail"];
-  if (pathname === "/vuln-scans") return ["Vulnerability Scans"];
-  if (pathname.startsWith("/vuln-scans/") && pathname.includes("/endpoints/")) {
-    return ["Vulnerability Scans", "Detail", "Endpoint"];
-  }
-  if (pathname.startsWith("/vuln-scans/")) return ["Vulnerability Scans", "Detail"];
   if (pathname.match(/^\/targets\/[^/]+\/workspace\/tasks\/[^/]+$/))
     return ["Target Workspace", "Detail", "Task"];
   if (pathname.match(/^\/targets\/[^/]+\/workspace$/))
     return ["Target Workspace", "Detail"];
-  if (pathname.match(/^\/targets\/[^/]+\/risk$/))
-    return ["Target Workspace", "Risk View"];
   if (pathname === "/targets") return ["Target Workspace", "Assets"];
   if (pathname === "/operations/launch") return ["Operations", "Launch Operation"];
   if (pathname === "/operations") return ["Operations", "Operation History"];

@@ -23,7 +23,18 @@
 ### M5 — Enrichment (BBOT only)
 ✅ Fully complete — 2026-05-09
 
-### M-Vuln-1 — Vulnerability Schema + Scan-kind Plumbing
+### M-Vuln-* — Vulnerability Analysis pipeline
+🗑 **REMOVED 2026-05-23** — feature deleted end-to-end. Migration `0020_drop_vuln_feature` drops
+`vulnerabilities` / `vuln_evidence` / `vuln_run_matches` / `cve_intel` / `hvt_signals` tables,
+`Scan.kind` / `parent_scan_id` / `intrusive` columns, and the `vuln_severity` / `vuln_status` /
+`scan_kind` / `hvt_signal_type` enums. Deleted: `app/api/{vuln_scans,vulns}.py`,
+`app/schemas/vuln.py`, `app/services/{vulns,vuln_view,correlator_engine,risk_score,hvt_score,hvt_signals,endpoints}.py`,
+`app/workers/{vuln_runner,feeds_refresher}.py`, `app/pipeline/vuln/`, five vuln models,
+`infra/Dockerfile.vuln_worker`, the `vuln-worker` compose service, `/vuln-scans*` frontend routes,
+`/targets/[id]/risk`, and all `Vuln*` types in `lib/api.ts`. Kept (shared with recon/investigation):
+`endpoints`, `endpoint_observations`, `tls_observations`, `services`, `technologies`, `ai_usage`.
+
+### M-Vuln-1 (historical) — Vulnerability Schema + Scan-kind Plumbing
 ✅ Complete (committed + pushed to `dev_vuln_dash`)
 
 Migrations 0005–0007. ORM models: Service, Technology, Vulnerability, VulnEvidence, VulnRunMatch. Scan.kind/parent_scan_id/intrusive. Stage.applies() predicate. upsert_assets() dual-writes Service+Technology. scan_view rewritten for first-class tables.

@@ -13,8 +13,6 @@ from app.api import (
     target_workspaces,
     targets,
     users as users_api,
-    vuln_scans,
-    vulns,
 )
 from app.api.admin import audit as admin_audit
 from app.api.admin import settings as admin_settings
@@ -49,8 +47,6 @@ app.include_router(admin_audit.router)
 app.include_router(admin_settings.router)
 app.include_router(scans.router)
 app.include_router(targets.router)
-app.include_router(vuln_scans.router)
-app.include_router(vulns.router)
 app.include_router(target_workspaces.router)
 app.include_router(operations_api.router)
 

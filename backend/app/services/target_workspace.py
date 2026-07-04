@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     Asset,
     AssetObservation,
-    HvtSignal,
     InvestigationFinding,
     InvestigationTask,
     InvestigationTaskStatus,
@@ -193,22 +192,8 @@ async def build_workspace_overview(
         )
     ) or 0
 
-    hvt_count = (
-        await db.scalar(
-            select(func.count(HvtSignal.id)).where(HvtSignal.target_id == target_id)
-        )
-    ) or 0
-
-    hvt_rows = (
-        await db.execute(
-            select(HvtSignal.signal_type, func.count(HvtSignal.id))
-            .where(HvtSignal.target_id == target_id)
-            .group_by(HvtSignal.signal_type)
-        )
-    ).all()
-    hvt_signal_summary = {
-        (st.value if hasattr(st, "value") else str(st)): cnt for st, cnt in hvt_rows
-    }
+    hvt_count = 0
+    hvt_signal_summary: dict[str, int] = {}
 
     return {
         "total_subdomains": total_subdomains,
@@ -370,18 +355,7 @@ async def build_workspace_subdomain_rows(
         if status_str == "completed":
             tools_run_by_asset[aid].add(tool)
 
-    # HVT signals per asset
-    hvt_rows = (
-        await db.execute(
-            select(HvtSignal.asset_id, HvtSignal.signal_type).where(
-                HvtSignal.asset_id.in_(asset_ids)
-            )
-        )
-    ).all()
     hvts_by_asset: dict[UUID, set[str]] = defaultdict(set)
-    for asset_id, signal_type in hvt_rows:
-        st = signal_type.value if hasattr(signal_type, "value") else str(signal_type)
-        hvts_by_asset[asset_id].add(st)
 
     rows: list[dict] = []
     for fqdn in sorted(fqdns):

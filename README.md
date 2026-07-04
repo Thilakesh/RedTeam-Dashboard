@@ -1,6 +1,6 @@
 # Red Team Recon Dashboard
 
-Multi-tenant Attack Surface Management (ASM) platform. Submit a domain, run a recon pipeline, discover services and vulnerabilities, investigate assets — all scoped per tenant with a full audit trail.
+Multi-tenant Attack Surface Management (ASM) platform. Submit a domain, run a recon pipeline, discover services, investigate assets, and launch standalone operations — all scoped per tenant with a full audit trail.
 
 **Architecture and detailed roadmap:** [`you-are-a-senior-shiny-hearth.md`](you-are-a-senior-shiny-hearth.md)
 **Technical documentation:** [`docs/technical-documentation.md`](docs/technical-documentation.md)
@@ -22,17 +22,13 @@ Multi-tenant Attack Surface Management (ASM) platform. Submit a domain, run a re
 | AI risk prioritization (OpenRouter, Risks tab) | M3 | Deployed |
 | Workflow dashboard: Add Scan / Recon Jobs, queued/stopped lifecycle | M4 | Deployed |
 | BBOT enrichment (heavy-worker, deep profile) | M5 | Deployed |
-| Vulnerability analysis pipeline (nuclei, testssl, nmap NSE, correlator, EPSS/KEV) | M-Vuln-1 to 3 | Deployed |
-| Conditional vuln stages (tech-gated), HVT signals, endpoint discovery | M-Vuln-5 to 6 | Deployed |
-| Risk scoring (CVSS + EPSS + KEV + exposure), AI triage | M-Vuln-7 | Deployed |
-| 9-tab vuln scan UI (By Service, By Tech, Endpoints, TLS, HVTs, Triage, Diff) | M-Vuln-8 | Deployed |
-| Cross-scan target risk rollup page | M-Vuln-8 | Deployed |
+| Vulnerability analysis pipeline (M-Vuln-1..M-Vuln-8) | — | **Removed** |
 | Target Workspace: 4 investigation adapters (TestSSL/Nmap/FFUF/Dirsearch) | M-TW-1 | Deployed |
 | Scan profiles, ScanConfigurationCard with command preview | M-TW-2 (partial) | Deployed |
 | RS256 JWT + rotating-refresh cookies + CSRF + RBAC (admin/analyst) | Auth overhaul | Deployed |
 | Admin panel: users, sessions, audit log, feature flags | Auth overhaul | Deployed |
 | Invite-only onboarding (no public signup) | Auth overhaul | Deployed |
-| Delete functionality (scans, vuln-scans, workspaces, tasks) | Auth overhaul | Deployed |
+| Delete functionality (scans, workspaces, tasks) | Auth overhaul | Deployed |
 | Scan authorization gating removed (trusted-operator model) | elegant-yeti | Deployed |
 | Manual standalone operations (no recon asset required) | logical-otter | **Pending** |
 
@@ -85,7 +81,7 @@ The backend runs `alembic upgrade head` on startup — migrations apply automati
 
 **After Python module changes to workers:** restart the affected worker:
 ```bash
-docker compose restart worker heavy-worker vuln-worker investigation-worker
+docker compose restart worker heavy-worker investigation-worker
 ```
 
 ---

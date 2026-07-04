@@ -127,23 +127,6 @@ services:
       - ../backend:/app
     restart: unless-stopped
 
-  vuln-worker:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.vuln_worker
-    environment:
-      DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
-      REDIS_URL: redis://redis:6379/0
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ../backend:/app
-    restart: unless-stopped
-
   investigation-worker:
     build:
       context: ..
