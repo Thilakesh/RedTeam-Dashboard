@@ -1,399 +1,196 @@
 # Architecture
 
-> All 8 diagrams also collected in [`docs/diagrams.md`](diagrams.md) as a quick-reference index.
+Multi-tenant Attack Surface Management (ASM) platform. This document describes
+the layered runtime, module boundaries, and data flow of the current codebase
+(post migration `0020` — Vulnerability Analysis feature removed).
+
+For usage recipes, see [`APPLICATION_GUIDE.md`](../APPLICATION_GUIDE.md).
+For diagrams, see [`docs/diagrams.md`](diagrams.md).
 
 ---
 
-## 1. High-Level System Architecture
+## 1. Layered monolith (5 planes)
 
-The platform is a **five-plane layered monolith** — all code lives in one repo with enforced module boundaries. No microservices split (explicitly deferred).
-
-```mermaid
-graph TB
-    subgraph Browser
-        FE["Next.js 14\n:3000"]
-    end
-
-    subgraph "API Container :8000"
-        API["FastAPI\n(Uvicorn)"]
-        CSRF["CSRF Middleware"]
-        AUTH["Auth: RS256 cookies\n+ rotating refresh"]
-    end
-
-    subgraph "Data Layer"
-        PG[("PostgreSQL 16\n:5432")]
-        RD[("Redis 7\n:6379")]
-        MN[("MinIO\n:9000")]
-    end
-
-    subgraph "Worker Containers"
-        W1["worker\n(default queue)\nquick/standard recon"]
-        W2["heavy-worker\n(heavy queue)\ndeep recon + BBOT"]
-        W3["vuln-worker\n(vuln queue)\nvuln analysis"]
-        W4["investigation-worker\n(investigation queue)\nnmap/ffuf/dirsearch/testssl"]
-    end
-
-    FE -- "cookie auth\nX-CSRF-Token\ncredentials:include" --> API
-    API --> PG
-    API -- "pub/sub\nsession cache\nblacklist" --> RD
-    API -- "enqueue jobs" --> RD
-    W1 & W2 & W3 & W4 -- "dequeue" --> RD
-    W1 & W2 & W3 & W4 --> PG
-    W2 -- "screenshots" --> MN
-    FE -- "screenshot URLs" --> MN
-    W1 & W2 -- "publish events\nscan:{id}" --> RD
-    W3 -- "publish events\nscan:{id}" --> RD
-    W4 -- "publish events\ninvestigation:{id}" --> RD
-    API -- "SSE stream\n/scans/{id}/stream" --> FE
+```
+Presentation   Next.js App Router                            frontend/
+     │
+     │  JSON + CSRF-guarded fetch                            frontend/lib/api.ts
+     ▼
+API            FastAPI routers (auth, tenant scope)          backend/app/api/
+     │
+     ▼
+Orchestration  Recon DAG + Investigation runner +            backend/app/pipeline/
+               Operations runner                             backend/app/workers/
+     │
+     ▼  Arq / Redis
+Execution      Adapters wrap CLI tools & HTTP probes         backend/app/pipeline/**/adapters/
+     │
+     ▼
+Data           Postgres asset graph + observations           backend/app/models/
+               MinIO for screenshots
 ```
 
----
-
-## 2. Five-Plane Layered Monolith
-
-| Plane | Responsibility | Key Paths |
-|---|---|---|
-| **Presentation** | Next.js App Router, TanStack Query, Radix UI, Tailwind | `frontend/app/`, `frontend/components/`, `frontend/lib/api.ts` |
-| **API** | FastAPI routers, Pydantic schemas, RBAC deps, CSRF | `backend/app/api/`, `backend/app/schemas/` |
-| **Orchestration** | DAG executors (recon + vuln), investigation runner, scan profiles | `backend/app/pipeline/coordinator.py`, `pipeline/vuln/coordinator.py`, `workers/investigation_runner.py` |
-| **Execution** | Arq workers per queue, subprocess sandboxing, pub/sub | `backend/app/workers/` |
-| **Data** | PostgreSQL (ORM + migrations), Redis (queue + pub/sub + session), MinIO | `backend/app/models/`, `backend/migrations/`, `backend/app/core/` |
-
-### Module boundary rules
-
-| Module | MUST | MUST NOT |
-|---|---|---|
-| `pipeline/adapters/*` | invoke CLI tool, parse output, return `AssetRecord[]` | touch DB |
-| `pipeline/vuln/adapters/*` | consume frozen `VulnStageContext`, return `VulnRecord[]` | touch assets/services/technologies; re-run recon tools |
-| `pipeline/investigation/adapters/*` | return `FindingRecord[]`, `ServiceUpdateRecord[]`, `EndpointRecord[]` | write to DB directly |
-| `services/assets.py` | upsert Asset + AssetObservation (flush only) | run subprocesses |
-| `services/vulns.py` | upsert Vulnerability + VulnEvidence + VulnRunMatch (flush only) | touch assets/services/technologies |
-| `workers/runner.py` | recon scan lifecycle, pub/sub, progress tracking | contain business logic |
-| `agents/risk_prioritizer.py` | read asset graph, call LLM, write findings | return `AssetRecord[]` |
+The 5 planes are **module boundaries within a single repo**, not separate
+services. Do not split into microservices — that decision is explicitly
+deferred.
 
 ---
 
-## 3. Frontend Component Architecture
+## 2. Runtime components
 
-```mermaid
-flowchart TD
-    ROOT["app/layout.tsx\n(Providers: QueryClient, ThemeProvider, AuthContext)"]
+| Container              | Image                                      | Queue(s)         | Purpose                                                                 |
+|------------------------|--------------------------------------------|------------------|-------------------------------------------------------------------------|
+| `postgres`             | `postgres:16-alpine`                        | —                | Primary data store (asset graph + observations + auth + settings).      |
+| `redis`                | `redis:7-alpine`                            | —                | Arq broker + pub/sub for live progress events + CSRF blacklist.         |
+| `minio`                | `minio/minio`                               | —                | Object store for screenshots produced by `gowitness`.                   |
+| `backend`              | `infra/Dockerfile.backend`                  | —                | FastAPI + Uvicorn on `:8000`. Runs `alembic upgrade head` at boot.      |
+| `frontend`             | `node:20-alpine`                            | —                | Next.js 14 dev server on `:3000`.                                       |
+| `worker`               | `infra/Dockerfile.worker`                   | `default`        | Recon quick/standard profiles.                                          |
+| `heavy-worker`         | `infra/Dockerfile.worker`                   | `heavy`          | Recon deep profile + BBOT enrichment.                                   |
+| `investigation-worker` | `infra/Dockerfile.investigation_worker`     | `investigation`  | Per-asset Investigation tasks **and** standalone Operations.            |
 
-    ROOT --> AUTH_LAYOUT["(auth)/layout.tsx\n(no AppShell)"]
-    ROOT --> APP_PAGES["All other pages\n(wrap in AppShell)"]
-
-    AUTH_LAYOUT --> LOGIN["login/page.tsx"]
-    AUTH_LAYOUT --> INVITE["accept-invite/page.tsx"]
-
-    APP_PAGES --> APPSHELL["AppShell.tsx\n(sidebar nav + breadcrumbs + theme toggle)"]
-    APPSHELL --> DASHBOARD["dashboard/\nAdd Scan + Recon Jobs"]
-    APPSHELL --> SCANS["scans/[id]/page.tsx\n8-tab recon detail"]
-    APPSHELL --> VULN["vuln-scans/[id]/page.tsx\n9-tab vuln detail"]
-    APPSHELL --> TARGETS["targets/[id]/workspace/\n3-tab investigation"]
-    APPSHELL --> ADMIN["admin/ (admin role required)"]
-
-    SCANS --> TABS1["Overview | Subdomains\nIPs | CDN/WAF | Tech\nPorts | Risks | History"]
-    VULN --> TABS2["Overview | Vulns | By Service\nBy Tech | Endpoints | TLS\nHVTs | Triage | Diff"]
-    TARGETS --> TABS3["Overview | Subdomains\n(ScanConfigurationCard)\nTasks"]
-
-    SCANS & VULN & TARGETS --> APILIB["lib/api.ts\n(typed fetch + auto-refresh + CSRF)"]
-    APILIB --> BE["FastAPI :8000"]
-```
+Removed from earlier revisions: `vuln-worker` (queue `vuln`) — deleted in the
+Vulnerability Scans removal.
 
 ---
 
-## 4. Database Entity Relationships
+## 3. Key modules
 
-```mermaid
-erDiagram
-    Organization ||--o{ Project : "has"
-    Organization ||--o{ User : "has"
-    Project ||--o{ Target : "has"
-    Target ||--o{ Scan : "has"
-    Target ||--o{ TargetWorkspace : "has"
-    Target ||--o{ Asset : "has"
-    Target ||--o{ Vulnerability : "has"
-
-    Scan ||--o{ ScanStage : "has"
-    Scan ||--o{ AssetObservation : "produces"
-    Scan ||--o{ Finding : "has"
-    Scan ||--o{ AiUsage : "logs"
-    Scan }o--o| Scan : "parent_scan_id (vuln→recon)"
-
-    Asset ||--o{ AssetObservation : "has"
-    Asset ||--o{ InvestigationTask : "linked via"
-
-    TargetWorkspace ||--o{ InvestigationTask : "contains"
-    InvestigationTask ||--o{ InvestigationFinding : "produces"
-
-    Vulnerability ||--o{ VulnEvidence : "has"
-    Vulnerability ||--o{ VulnRunMatch : "tracked by"
-    Vulnerability }o--o| CveIntel : "enriched by"
-
-    Service ||--o{ HvtSignal : "signals"
-    Service ||--o{ TlsObservation : "has"
-    Service ||--o{ Endpoint : "has"
-
-    User ||--o{ RefreshSession : "has"
-    User ||--o{ AuditLog : "actor"
-    User ||--o{ UserFeature : "has"
-    RefreshSession }o--|| BlacklistedJti : "revoked via"
-
-    Organization {
-        uuid id PK
-        string name
-    }
-    User {
-        uuid id PK
-        uuid org_id FK
-        string email
-        string role "admin|analyst"
-        bool is_active
-    }
-    Target {
-        uuid id PK
-        uuid project_id FK
-        string domain
-    }
-    Scan {
-        uuid id PK
-        uuid target_id FK
-        uuid org_id "denormalized"
-        string kind "recon|vuln_analysis"
-        string status
-        string profile
-        bool intrusive
-        uuid parent_scan_id FK
-    }
-    Asset {
-        uuid id PK
-        uuid target_id FK
-        string type "subdomain|ipv4|service|screenshot"
-        string canonical_key "dedup identity"
-        datetime first_seen
-        datetime last_seen
-    }
-    Vulnerability {
-        uuid id PK
-        uuid target_id FK
-        string canonical_key "dedup identity"
-        string status "open|triaged|fixed|reopened|wont_fix|false_positive"
-        float cvss_score
-        float epss_score
-        float risk_score "composite"
-        bool kev
-    }
-    InvestigationTask {
-        uuid id PK
-        uuid workspace_id FK
-        uuid asset_id FK "NOT NULL (pending logical-otter)"
-        string tool
-        string status
-        jsonb params "protocol, port, profile, custom_args"
-        text raw_output
-    }
-```
+| Concern              | File                                                                 |
+|----------------------|----------------------------------------------------------------------|
+| API routers          | `backend/app/api/*.py` + `backend/app/api/admin/*.py`                |
+| Auth deps + RBAC     | `backend/app/api/deps.py`                                            |
+| Tenant scoping       | Every service uses `where(org_id == user.org_id)` + `user.scan_filter(created_by)` |
+| Recon DAG            | `backend/app/pipeline/coordinator.py` + `backend/app/pipeline/adapters/*` |
+| Investigation        | `backend/app/pipeline/investigation/adapters/*` + `backend/app/workers/investigation_runner.py` |
+| Operations           | `backend/app/services/operations_command.py` + `backend/app/services/operations.py` + `backend/app/workers/investigation_runner.py::run_operation` |
+| AI risk ranking      | `backend/app/agents/risk_prioritizer.py` + `backend/app/agents/bounded_completion.py` |
+| Queue enqueues       | `backend/app/services/queue.py`                                      |
+| Scan profiles        | `backend/app/services/scan_profiles.py`                              |
+| System settings (DB) | `backend/app/services/system_settings.py`                            |
+| Audit log            | `backend/app/services/audit.py`                                      |
+| API client           | `frontend/lib/api.ts`                                                |
+| Nav + breadcrumbs    | `frontend/components/AppShell.tsx`                                   |
 
 ---
 
-## 5. Authentication Flow
+## 4. Locked architectural decisions
 
-```mermaid
-sequenceDiagram
-    participant B as Browser
-    participant API as FastAPI
-    participant DB as PostgreSQL
-    participant RD as Redis
-
-    Note over B,API: Login
-    B->>API: POST /auth/login {email, password}
-    API->>DB: lookup User, verify bcrypt hash
-    API->>DB: INSERT RefreshSession (opaque token hash)
-    API->>RD: HSET session:{id} + SADD session:user:{uid}
-    API-->>B: Set-Cookie: rt_access (HttpOnly, 10min)<br/>rt_refresh (HttpOnly, path=/auth, 14d)<br/>rt_csrf (JS-readable)
-    API-->>B: 200 {csrf_token, user}
-
-    Note over B,API: Authenticated Request
-    B->>API: GET /scans (Cookie: rt_access; X-CSRF-Token: ...)
-    API->>RD: EXISTS blacklist:jti:{jti}?
-    API->>DB: get User by id
-    API-->>B: 200 [scans]
-
-    Note over B,API: Token Refresh (transparent)
-    B->>API: GET /scans → 401
-    B->>API: POST /auth/refresh (Cookie: rt_refresh)
-    API->>DB: find RefreshSession by token hash
-    API->>DB: mark old session revoked (rotation)
-    API->>DB: INSERT new RefreshSession
-    API-->>B: Set-Cookie: new rt_access, rt_refresh, rt_csrf
-    B->>API: GET /scans (retry with new rt_access)
-    API-->>B: 200 [scans]
-
-    Note over B,API: Logout
-    B->>API: POST /auth/logout
-    API->>DB: revoke RefreshSession
-    API->>RD: DEL session:{id}
-    API-->>B: Clear all 3 cookies
-```
+1. **SaaS-first, multi-tenant.** Every scan-relevant row carries `org_id`;
+   every query filters on it.
+2. **Layered monolith, not microservices.** All 5 planes live in one repo,
+   one image (per role). No k8s.
+3. **Docker Compose is the deployment target.** Each container is one process.
+4. **Arq + Redis.** Three queues: `default` (recon light), `heavy` (recon
+   deep + bbot), `investigation` (per-asset tasks + standalone operations).
+5. **Postgres asset graph.** `assets` is deduped by
+   `(target_id, type, canonical_key)`; per-run history lives in
+   `asset_observations`. Do not add a "results" table that duplicates data
+   per-scan.
+6. **Structured findings**, never raw terminal output as the user surface.
+   Adapters return dataclasses that services normalize into DB rows; per-tool
+   result components render structured views; the raw output lives in a
+   collapsible panel only.
+7. **Argv, never `shell=True`.** All CLI wrapping goes through
+   `asyncio.create_subprocess_exec` with an argv list; user-supplied strings
+   never flow into a shell. Manual Operation targets pass strict domain /
+   IPv4 validation before reaching argv (argument-injection guard).
+8. **Preview equals execution.** For Operations, the server-side
+   `render_command` mirrors the exact argv the adapter builds — the preview
+   an analyst sees is what runs.
+9. **Investigation adapters are shared execution code.** Operations reuse
+   them by synthesizing a `TaskContext`; adapters never know which entry
+   point invoked them.
+10. **No live feed calls from stages.** Stages read the DB; background jobs
+    (if any) write feeds. Historically enforced by CI in the removed vuln
+    module.
 
 ---
 
-## 6. Recon Pipeline Flow
+## 5. Auth model
 
-```mermaid
-flowchart TD
-    UI["User: POST /scans\n(domain, profile)"] --> API
-    API["API: create Scan row\nstatus=queued"] --> Q{autostart?}
-    Q -- yes --> ENQ["enqueue job\nservices/queue.py"]
-    Q -- no --> WAIT["status=queued\n(user starts later)"]
-    ENQ --> RD[("Redis queue\n(default or heavy)")]
-    RD --> WORKER["Worker picks up\nworkers/runner.py"]
-    WORKER --> DAG["execute_dag()\npipeline/coordinator.py\n\nL0: subfinder + assetfinder (parallel)\nL1: amass, dnsx\nL2: httpx + asnmap + geoip (parallel)\nL3: wafw00f\n[deep] L4: naabu\n[deep] L5: nmap\n[deep] L6: gowitness\n[deep] L7: risk_prioritizer"]
-    DAG --> EACH["each stage:\non_start → execute → on_done/on_fail/on_skip"]
-    EACH --> UPSERT["services/assets.py\nupsert_assets()\nAsset + AssetObservation"]
-    EACH --> PUB["Redis pub/sub\nscan:{scan_id}\n{event, stage_name, ...}"]
-    PUB --> SSE["GET /scans/{id}/stream\nSSE endpoint"]
-    SSE --> TQ["TanStack Query\ninvalidateQueries on each event"]
-    UPSERT --> PG[("PostgreSQL")]
-```
+- **RS256 JWT** with rotating refresh sessions. Access token in `rt_access`
+  HTTP-only cookie; refresh token in `rt_refresh`. Bootstrap admin created
+  from `ADMIN_EMAIL` / `ADMIN_PASSWORD` env on first boot.
+- **CSRF**: double-submit cookie `rt_csrf` + `X-CSRF-Token` header. The
+  frontend `api()` client attaches this automatically for POST/PATCH/DELETE.
+- **Roles**: `admin` sees the whole org; `analyst` sees only their own scans
+  (enforced via `CurrentUser.scan_filter()`).
+- **Feature flags** (`backend/app/core/features.py`) — per-user opt-outs of
+  specific tools/features. Missing row = enabled.
 
 ---
 
-## 7. Vulnerability Scan Flow
+## 6. Data model (current tables)
 
-```mermaid
-sequenceDiagram
-    participant U as Analyst
-    participant FE as Next.js
-    participant API as FastAPI
-    participant RD as Redis
-    participant VW as vuln-worker
+Kept after migration `0020`:
 
-    U->>FE: "Run Vulnerability Analysis"
-    FE->>API: POST /vuln-scans {parent_scan_id, profile}
-    API->>API: validate parent status=completed, same org
-    API->>API: INSERT Scan(kind=vuln_analysis)
-    API->>RD: enqueue to "vuln" queue
-    API-->>FE: 201 {id}
-    FE->>FE: navigate to /vuln-scans/{id}
+| Group            | Tables                                                                              |
+|------------------|-------------------------------------------------------------------------------------|
+| Identity         | `organizations`, `projects`, `users`, `refresh_sessions`, `user_features`, `blacklisted_jti`, `audit_logs` |
+| Targets          | `targets`, `assets`, `asset_observations`                                           |
+| Recon scans      | `scans`, `scan_stages`, `services`, `technologies`, `findings`, `ai_usage`          |
+| Investigation    | `target_workspaces`, `investigation_tasks`, `investigation_findings`                |
+| Shared enrich    | `endpoints`, `endpoint_observations`, `tls_observations`                            |
+| Operations       | `operations`, `operation_findings`                                                   |
+| Settings         | `system_settings`                                                                    |
 
-    VW->>RD: dequeue job
-    VW->>VW: load_vuln_context() → frozen VulnStageContext
-    VW->>RD: publish scan.started
-    loop For each stage (topo order)
-        VW->>VW: applies(ctx)? intrusive_required?
-        VW->>VW: stage.execute_vuln(ctx) → VulnRecord[]
-        VW->>VW: upsert_vulns()
-        VW->>RD: publish stage.completed
-    end
-    VW->>VW: correlator: merge_by_cve + EPSS/KEV + risk_scores
-    VW->>VW: ai_triage (top-20 by risk_score)
-    VW->>RD: publish scan.completed
-    FE->>API: GET /vuln-scans/{id}/overview
-    FE->>FE: render 9-tab UI
-```
+Dropped in `0020`: `vulnerabilities`, `vuln_evidence`, `vuln_run_matches`,
+`cve_intel`, `hvt_signals` + Scan columns `kind` / `parent_scan_id` /
+`intrusive` + 4 enums (`scan_kind`, `vuln_severity`, `vuln_status`,
+`hvt_signal_type`).
+
+### Asset graph invariants
+
+- `Asset(target_id, type, canonical_key)` is unique.
+- `canonical_key` is the dedup identity — lowercased FQDN for `subdomain`,
+  dotted-quad for `ipv4`, `host:port/proto` for a `service`. Changing a
+  canonical_key requires a migration.
+- `AssetObservation` is append-only per-scan; a repeat sighting updates
+  `Asset.last_seen` and adds a new observation.
 
 ---
 
-## 8. Memory and Hooks Flow
+## 7. Live progress channels
 
-```mermaid
-flowchart LR
-    subgraph "Session Start (automatic)"
-        HOOK["SessionStart hook\n.claude/settiings.local.json"]
-        SH[".claude/hooks/session-start.sh"]
-        M1["memory/project_state.md"]
-        M2["memory/active_tasks.md"]
-        M3["memory/next_steps.md"]
-        M4["memory/application_flow.md"]
-        CTX["Claude context window"]
+| Producer                                        | Redis channel               | Consumer                                                                  |
+|-------------------------------------------------|-----------------------------|---------------------------------------------------------------------------|
+| Recon `runner.py`                               | `scan:{scan_id}`            | API `GET /scans/{id}/stream` (SSE) → UI updates tabs.                     |
+| Investigation `investigation_runner.py`         | `investigation:{task_id}`   | Workspace SSE stream (filtered by `workspace:{ws}:tasks` Redis SET).       |
+| Operations `investigation_runner.py::run_operation` | `operation:{operation_id}` | Currently polled by the UI (4s `refetchInterval`); SSE is a future task.   |
 
-        HOOK --> SH
-        SH -- "cat" --> M1 & M2 & M3 & M4
-        M1 & M2 & M3 & M4 --> CTX
-    end
-
-    subgraph "Session End (manual)"
-        CMD["/handoff command\n.claude/commands/handoff.md"]
-        CLAUDE["Claude analyzes\nsession work"]
-        W1["writes project_state.md\n(milestone status)"]
-        W2["writes active_tasks.md\n(completed + pending)"]
-        W3["writes next_steps.md\n(next actions)"]
-        W4["writes application_flow.md\n(flow changes)"]
-
-        CMD --> CLAUDE
-        CLAUDE --> W1 & W2 & W3 & W4
-    end
-
-    NOTE["memory/architecture.md\nexists but NOT in hook script yet\n(added this session)"]
-```
+Terminal events always fire (`scan.completed` / `scan.failed` / `scan.stopped`
+/ `task.cancelled` / `operation.cancelled` etc.) so the SSE generator closes
+cleanly.
 
 ---
 
-## 9. Deployment Architecture
+## 8. Extension points (see `docs/developer-handover.md` for recipes)
 
-```mermaid
-graph TB
-    subgraph "Docker Compose (infra/)"
-        direction TB
-
-        PG[("postgres:16-alpine\n:5432\nvolume: postgres_data")]
-        RD[("redis:7-alpine\n:6379")]
-        MN[("minio/minio\n:9000 (API)\n:9001 (console)\nvolume: minio_data")]
-
-        subgraph "backend :8000"
-            BE["Dockerfile.app\nuvicorn + alembic upgrade head\nbind-mount: ../backend:/app\nvolume: jwt_secrets:/secrets/jwt"]
-        end
-
-        subgraph "worker (default queue)"
-            W1["Dockerfile.worker\nsubfinder + assetfinder + amass\ndnsx + httpx + naabu + nmap\ngowitness + wafw00f\nbind-mount: ../backend:/app"]
-        end
-
-        subgraph "heavy-worker (heavy queue)"
-            W2["Dockerfile.heavy-worker\nARQ_QUEUE_NAME=heavy\nbbot + all standard tools\nbind-mount: ../backend:/app"]
-        end
-
-        subgraph "vuln-worker (vuln queue)"
-            W3["Dockerfile.vuln_worker\nnuclei + testssl\nbind-mount: ../backend:/app"]
-        end
-
-        subgraph "investigation-worker"
-            W4["Dockerfile.investigation_worker\nnmap + ffuf 2.1.0\ndirsearch 0.4.3 + testssl 3.2\nSecLists wordlist\nbind-mount: ../backend:/app"]
-        end
-
-        subgraph "frontend :3000"
-            FE["node:20-alpine\nnpm run dev\nbind-mount: ../frontend:/app"]
-        end
-
-        BE & W1 & W2 & W3 & W4 -- "healthcheck wait" --> PG & RD
-        W1 & W2 & W3 & W4 -- "healthcheck wait" --> MN
-        BE -- "migrations on startup" --> PG
-    end
-
-    BROWSER["Browser"] --> FE
-    BROWSER --> BE
-    BROWSER --> MN
-```
+- **New recon stage** — implement the `Stage` protocol in
+  `backend/app/pipeline/stage.py`, add it to a profile in
+  `backend/app/pipeline/profiles.py`, install any binary in
+  `infra/Dockerfile.worker`, rebuild `worker`.
+- **New investigation tool** — implement `InvestigationAdapter` in
+  `pipeline/investigation/adapters/`, register it in `registry.py`, add a
+  bundle to `services/scan_profiles.py::PROFILES`, install the binary in
+  `Dockerfile.investigation_worker`, add a result renderer in
+  `frontend/components/workspace/tool-results/`.
+- **New Operations tool** — add it to `TOOLS`, `_DEFAULT_ARGS`, and
+  `render_command()` in `services/operations_command.py`.
+- **New table** — write the model, add it to `backend/app/models/__init__.py`
+  (autogenerate depends on this), then
+  `alembic revision --autogenerate -m "..."`.
 
 ---
 
-## Tenant Isolation Architecture
+## 9. What is **not** in the codebase
 
-Every scan-related query filters by `Scan.org_id`. This field is denormalized from the `Target → Project → Organization` chain so list and detail queries scope in a single WHERE clause without a 3-table join.
+The Vulnerability Scans feature (M-Vuln-1 … M-Vuln-8) was removed:
+- CVE-tagged Vulnerability rows, nuclei / correlator / AI-triage stages,
+  EPSS/KEV feeds, HVT signal scoring, `/vuln-scans` UI, `/targets/{id}/risk`
+  rollup — all deleted.
+- The old scan-authorization gate (verified-target-only) — replaced by
+  role-based access + per-user feature flags.
 
-`CurrentUser.scan_filter()` (in `backend/app/api/deps.py`) extends isolation with RBAC:
-- **admin**: sees all scans in the organization
-- **analyst**: sees only scans where `Scan.created_by == user.id`
-
-New tables that hold tenant data must follow the same denormalization pattern or join through `Project`.
-
----
-
-## Queue Routing
-
-| Queue name | Worker container | Dockerfile | Tools installed | What runs there |
-|---|---|---|---|---|
-| `default` | `worker` | `Dockerfile.worker` | subfinder, assetfinder, amass, dnsx, httpx, naabu, nmap, gowitness, wafw00f | quick + standard recon scans |
-| `heavy` | `heavy-worker` | `Dockerfile.heavy-worker` | all above + bbot | deep recon profile (bbot runs concurrently with passive stages) |
-| `vuln` | `vuln-worker` | `Dockerfile.vuln_worker` | nuclei, testssl | vulnerability analysis scans |
-| `investigation` | `investigation-worker` | `Dockerfile.investigation_worker` | nmap, ffuf, dirsearch, testssl, SecLists | per-asset investigation tasks from Target Workspace |
+See `memory/project_state.md` for the removal inventory and rationale.
