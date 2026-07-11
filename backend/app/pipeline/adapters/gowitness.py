@@ -16,6 +16,7 @@ from pathlib import Path
 
 from app.pipeline.stage import AssetRecord, StageContext
 from app.services import storage
+from app.services.net_guard import filter_allowed_hosts
 from app.workers.sandbox import get_preexec_fn
 
 
@@ -39,7 +40,9 @@ class GoWitnessStage:
         if binary is None:
             raise RuntimeError("gowitness binary not on PATH")
 
-        hosts = sorted(hosts)[: self._MAX_HOSTS]
+        hosts = filter_allowed_hosts(sorted(hosts)[: self._MAX_HOSTS])
+        if not hosts:
+            return []
 
         # Build http and https URLs for each host
         urls: list[tuple[str, str]] = []  # (url, host)

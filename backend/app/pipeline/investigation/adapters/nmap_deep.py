@@ -65,9 +65,24 @@ class NmapDeepAdapter:
                 raw_output="nmap binary missing",
             )
 
+        from app.services.net_guard import assert_target_allowed
         from app.services.scan_profiles import resolve_args
 
         host = ctx.asset_canonical_key
+        try:
+            assert_target_allowed(host)
+        except ValueError as e:
+            return InvestigationResult(
+                findings=[
+                    FindingRecord(
+                        kind="tool_error",
+                        severity="info",
+                        title="target blocked",
+                        description=str(e),
+                    )
+                ],
+                raw_output=str(e),
+            )
         profile_args = resolve_args("nmap_deep", ctx.params or {})
         if not profile_args:
             # Fallback to aggressive default if profile resolution returned nothing

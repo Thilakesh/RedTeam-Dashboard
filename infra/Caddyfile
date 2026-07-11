@@ -1,0 +1,29 @@
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Report-only: observes without enforcing, since Next.js's inline
+		# hydration scripts would need a nonce/hash setup to survive an
+		# enforced CSP. Flip to Content-Security-Policy once that's tuned.
+		Content-Security-Policy-Report-Only "default-src 'self'"
+	}
+}
+
+recon.thilakesh.in {
+	import security_headers
+	reverse_proxy frontend:3000
+}
+
+recon-api.thilakesh.in {
+	import security_headers
+	reverse_proxy backend:8000
+}
+
+recon-media.thilakesh.in {
+	import security_headers
+	reverse_proxy minio:9000 {
+		header_up Host minio:9000
+	}
+}

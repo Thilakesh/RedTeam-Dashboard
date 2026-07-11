@@ -27,6 +27,7 @@ from app.schemas.subdomain_view import (
     TechBucket,
 )
 from app.services import audit, scan_view
+from app.services.net_guard import assert_target_allowed
 from app.services.queue import enqueue_scan
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -86,7 +87,12 @@ async def create_scan(
     # Normalize domain (lowercase + strip) so it matches the verified-targets
     # store, which also stores lowercase. Mismatched case otherwise created a
     # fresh unverified Target row and tripped the aggressive-scan gate.
+    # (req.domain is already normalized by ScanCreateRequest's validator.)
     domain = req.domain.strip().lower()
+    try:
+        assert_target_allowed(domain)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
     target = await db.scalar(
         select(Target).where(Target.project_id == project_id, Target.domain == domain)
     )

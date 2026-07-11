@@ -1,4 +1,5 @@
 import logging
+import secrets
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +33,12 @@ app.add_middleware(CSRFMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_origin_regex=settings.cors_origin_regex,
+    # An empty string here must mean "no regex" (None) — Starlette compiles
+    # allow_origin_regex with re.compile() and an empty pattern matches every
+    # origin, which is the opposite of disabling it. Setting
+    # CORS_ORIGIN_REGEX="" in prod is how the localhost-dev default gets
+    # turned off without touching allow_origins.
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*", "X-CSRF-Token"],
@@ -73,16 +79,38 @@ async def _ensure_default_org() -> Organization:
 
 
 async def _ensure_bootstrap_admin() -> None:
-    """If no admin user exists, create one from ADMIN_EMAIL/ADMIN_PASSWORD env."""
+    """If no admin user exists, create one from ADMIN_EMAIL/ADMIN_PASSWORD env.
+
+    Never falls back to a known/hardcoded credential (config.py defaults are
+    blank). If ADMIN_EMAIL is unset, bootstrap is skipped — the operator must
+    set it and restart. If ADMIN_PASSWORD is unset, a random one is generated
+    and logged once at boot; it is never stored anywhere else, so this is the
+    only place to recover it.
+    """
     async with SessionLocal() as db:
         existing = await db.scalar(select(User).where(User.role == UserRole.admin))
         if existing is not None:
             return
+        if not settings.admin_email:
+            log.warning(
+                "bootstrap: ADMIN_EMAIL is not set — skipping admin creation. "
+                "Set ADMIN_EMAIL (and optionally ADMIN_PASSWORD) and restart."
+            )
+            return
         org = await _ensure_default_org()
+        password = settings.admin_password
+        if not password:
+            password = secrets.token_urlsafe(18)
+            log.warning(
+                "bootstrap: ADMIN_PASSWORD is not set — generated a random "
+                "password for %s (shown once, not stored anywhere else): %s",
+                settings.admin_email,
+                password,
+            )
         admin = User(
             org_id=org.id,
             email=settings.admin_email,
-            password_hash=hash_password(settings.admin_password),
+            password_hash=hash_password(password),
             role=UserRole.admin,
             is_active=True,
         )

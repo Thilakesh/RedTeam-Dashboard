@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ from app.services.cipher_strength import (
     is_secure_protocol,
     protocol_recommendation,
 )
+from app.workers.sandbox import get_preexec_fn
 
 log = logging.getLogger(__name__)
 
@@ -423,6 +425,7 @@ async def _run_testssl(host_port: str, out_path: Path, profile_args: list[str]) 
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
+        preexec_fn=get_preexec_fn() if sys.platform != "win32" else None,
     )
     try:
         await asyncio.wait_for(proc.wait(), timeout=_TIMEOUT_SEC)
@@ -455,7 +458,23 @@ class TestSslAdapter:
                 raw_output="",
             )
 
+        from app.services.net_guard import assert_target_allowed
         from app.services.scan_profiles import resolve_args
+
+        try:
+            assert_target_allowed(ctx.asset_canonical_key)
+        except ValueError as e:
+            return InvestigationResult(
+                findings=[
+                    FindingRecord(
+                        kind="tool_error",
+                        severity="info",
+                        title="target blocked",
+                        description=str(e),
+                    )
+                ],
+                raw_output=str(e),
+            )
 
         port = int(ctx.params.get("port") or _DEFAULT_PORT)
         host_port = f"{ctx.asset_canonical_key}:{port}"

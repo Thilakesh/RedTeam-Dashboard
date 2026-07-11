@@ -38,3 +38,11 @@ export function statusVariant(
   if (code >= 400) return "destructive";
   return "default";
 }
+
+// Endpoint/finding URLs come from the scanned (attacker-controlled) target's
+// own responses. React doesn't sanitize href schemes, so a javascript:/data:
+// URL would execute on click if bound directly. Only ever bind through this.
+export function safeHref(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}

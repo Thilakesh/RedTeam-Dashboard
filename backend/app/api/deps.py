@@ -12,7 +12,7 @@ from app.core.db import get_db
 from app.core.redis import get_redis
 from app.core.tokens import decode_access_token
 from app.models import User, UserRole
-from app.models.auth import BlacklistedJti
+from app.models.auth import BlacklistedJti, RefreshSession
 
 ACCESS_COOKIE = "rt_access"
 REFRESH_COOKIE = "rt_refresh"
@@ -60,11 +60,17 @@ async def _resolve_current_user(request: Request, db: AsyncSession) -> CurrentUs
         user_id = UUID(payload["sub"])
         jti = UUID(payload["jti"])
         session_id = UUID(payload["sid"])
+        issued_at = int(payload["iat"])
     except (KeyError, ValueError):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "malformed token claims") from None
 
-    # Fast-path blacklist check via Redis (per-jti and per-session-id), DB is
-    # the authoritative fallback for jti only.
+    # Fast-path blacklist check via Redis (per-jti and per-session-id) so the
+    # common case avoids an extra query. The RefreshSession.revoked check
+    # below is the DURABLE fallback: it's DB-backed, so logout / admin revoke
+    # / rotation / password-change revocation all still work even if Redis is
+    # flushed or briefly unavailable — previously revocation was Redis-only
+    # with dead DB fallbacks (blacklist:jti was never written, BlacklistedJti
+    # was never populated).
     redis = get_redis()
     if await redis.exists(f"blacklist:jti:{jti}"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token revoked")
@@ -73,11 +79,19 @@ async def _resolve_current_user(request: Request, db: AsyncSession) -> CurrentUs
     if await db.get(BlacklistedJti, jti) is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token revoked")
 
+    session = await db.get(RefreshSession, session_id)
+    if session is None or session.revoked:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "session revoked")
+
     user = await db.scalar(select(User).where(User.id == user_id))
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
     if not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user disabled")
+    if user.password_changed_at is not None and issued_at < int(
+        user.password_changed_at.timestamp()
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token predates password change")
 
     return CurrentUser(user, jti=jti, session_id=session_id)
 
