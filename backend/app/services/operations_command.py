@@ -10,18 +10,26 @@ placeholder tokens, so the previewed/stored command equals what the worker runs
 Security:
 - ``validate_target`` is an allowlist (domain / IPv4) that rejects argument
   injection — a host like ``-oN`` would otherwise be parsed by the tool as a
-  flag (argv, no shell).
-- ``validate_custom_args`` denies output/file-redirection flags per tool.
+  flag (argv, no shell). It also resolves the host through
+  ``app.services.net_guard.assert_target_allowed`` to block loopback,
+  link-local/cloud-metadata, and this platform's own service containers.
+- ``validate_custom_args`` delegates to ``app.services.tool_args`` — an
+  allow-list (not deny-list) of tuning flags per tool, which also rejects
+  bare positional tokens (blocking a second injected target/URL). The same
+  allow-list is enforced again inside ``scan_profiles.resolve_args`` at
+  actual execution time, so this check is belt-and-suspenders, not the only
+  gate.
 Commands are always argv lists passed to ``create_subprocess_exec`` (never a
 shell) — there is no shell-injection surface.
 """
 from __future__ import annotations
 
 import ipaddress
-import re
-import shlex
 
+from app.services.net_guard import DOMAIN_RE as _DOMAIN_RE
+from app.services.net_guard import assert_target_allowed
 from app.services.scan_profiles import PROFILES, resolve_args
+from app.services.tool_args import validate_custom_args as _validate_custom_args_allowlist
 
 TOOLS: set[str] = {"nmap_deep", "ffuf", "dirsearch", "testssl"}
 
@@ -41,23 +49,6 @@ _DEFAULT_ARGS: dict[str, list[str]] = {
     "testssl": ["--protocols", "--server-defaults", "--vulnerable", "-E"],
 }
 
-# Output / file-redirection flags an analyst may not pass via custom args.
-_DENYLIST: dict[str, set[str]] = {
-    "nmap_deep": {
-        "-on", "-og", "-ox", "-oa", "-os", "--stylesheet",
-        "-il", "--script-args-file", "--resume", "--datadir",
-    },
-    "ffuf": {"-o", "-od", "-debug-log", "-or"},
-    "dirsearch": {"-o", "--output", "--config", "-l", "--urls-file"},
-    "testssl": {
-        "--jsonfile", "--jsonfile-pretty", "--logfile", "--csvfile",
-        "--htmlfile", "--file", "-il", "-oa",
-    },
-}
-
-_DOMAIN_RE = re.compile(
-    r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
-)
 
 
 def _norm_protocol(protocol: str | None) -> str:
@@ -84,32 +75,23 @@ def validate_target(target_type: str, target: str) -> str:
     if target_type == "domain":
         if not _DOMAIN_RE.match(host):
             raise ValueError("invalid domain")
+        assert_target_allowed(host)
         return host
     if target_type == "ipv4":
         try:
             ip = ipaddress.IPv4Address(host)
         except ipaddress.AddressValueError:
             raise ValueError("invalid IPv4 address")
+        assert_target_allowed(str(ip))
         return str(ip)
     raise ValueError("target_type must be 'domain' or 'ipv4'")
 
 
 def validate_custom_args(tool: str, profile: str | None, custom_args: str | None) -> None:
-    """Raise ValueError on a denylisted flag. No-op unless profile == 'custom'."""
+    """Raise ValueError on a non-allow-listed flag. No-op unless profile == 'custom'."""
     if profile != "custom":
         return
-    raw = custom_args or ""
-    if not raw.strip():
-        return
-    try:
-        tokens = shlex.split(raw)
-    except ValueError:
-        raise ValueError("custom args could not be parsed")
-    denied = _DENYLIST.get(tool, set())
-    for tok in tokens:
-        flag = tok.split("=", 1)[0].lower()
-        if flag in denied:
-            raise ValueError(f"flag '{flag}' is not permitted in custom args for {tool}")
+    _validate_custom_args_allowlist(tool, custom_args)
 
 
 def _resolve_args(tool: str, profile: str | None, custom_args: str | None) -> list[str]:

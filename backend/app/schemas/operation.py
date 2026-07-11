@@ -7,11 +7,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.base import StrictRequest
+
 TargetType = Literal["domain", "ipv4"]
 Protocol = Literal["http", "https"]
 
 
-class OperationPreviewRequest(BaseModel):
+class OperationPreviewRequest(StrictRequest):
     target_type: TargetType
     target: str
     tool: str

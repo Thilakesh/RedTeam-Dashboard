@@ -9,7 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { InvestigationFindingOut } from "@/lib/api";
-import { statusVariant } from "./shared";
+import { safeHref, statusVariant } from "./shared";
 
 type Row = {
   path: string;
@@ -178,7 +178,7 @@ export function EndpointsResult({
                     <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
                   )}
                   <a
-                    href={r.url}
+                    href={safeHref(r.url)}
                     target="_blank"
                     rel="noreferrer"
                     className="font-mono text-sm text-primary hover:underline"
@@ -187,7 +187,7 @@ export function EndpointsResult({
                   </a>
                   {r.status !== null && r.status >= 200 && r.status < 300 && (
                     <a
-                      href={r.url}
+                      href={safeHref(r.url)}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
@@ -308,7 +308,7 @@ export function EndpointsResult({
                   <tr key={r.path} className="border-t border-border/50">
                     <td className="px-3 py-2 font-mono text-xs break-all max-w-xs">
                       <a
-                        href={r.url}
+                        href={safeHref(r.url)}
                         target="_blank"
                         rel="noreferrer"
                         className="text-primary hover:underline"
@@ -356,7 +356,7 @@ export function EndpointsResult({
                     <td className="px-3 py-2 text-right">
                       {isOk ? (
                         <a
-                          href={r.url}
+                          href={safeHref(r.url)}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-primary hover:bg-muted"

@@ -22,7 +22,7 @@ from sqlalchemy.sql import func
 
 from app.models.endpoint import Endpoint
 from app.pipeline.investigation.stage import EndpointRecord
-from app.pipeline.vuln.adapters.endpoint_classifier import _classify
+from app.pipeline.investigation.endpoint_classifier import _classify
 
 
 async def upsert_endpoint_enrichment(

@@ -75,6 +75,15 @@ async def patch_profile(
         changes["password"] = "changed"
 
     if req.email is not None and req.email != row.email:
+        is_super_admin = row.email.lower() == get_settings().super_admin_email.lower()
+        if is_super_admin:
+            # Super-admin status is derived by email match (settings.
+            # super_admin_email) — letting the super-admin change their own
+            # email would silently move (or lose) that designation.
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "the super-admin account's email cannot be changed",
+            )
         row.email = req.email
         changes["email"] = req.email
 

@@ -2,13 +2,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.base import StrictRequest
 
-class LoginRequest(BaseModel):
+
+class LoginRequest(StrictRequest):
     email: EmailStr
     password: str
 
 
-class InviteAcceptRequest(BaseModel):
+class InviteAcceptRequest(StrictRequest):
     token: str = Field(min_length=10, max_length=200)
     password: str = Field(min_length=8, max_length=128)
 

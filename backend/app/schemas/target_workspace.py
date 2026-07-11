@@ -7,8 +7,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.base import StrictRequest
 
-class WorkspaceCreateRequest(BaseModel):
+
+class WorkspaceCreateRequest(StrictRequest):
     parent_scan_id: UUID
 
 
@@ -79,9 +81,12 @@ class WorkspaceSubdomainsResponse(BaseModel):
     rows: list[WorkspaceSubdomainRow]
 
 
-class InvestigationTaskCreateRequest(BaseModel):
+class InvestigationTaskCreateRequest(StrictRequest):
     asset_id: UUID
     tool: str
+    # extra="forbid" only rejects unrecognized TOP-LEVEL fields — it doesn't
+    # reach inside this dict. The API layer (target_workspaces.py) already
+    # allow-lists params' own keys before use; see H1 in the security audit.
     params: dict[str, Any] = Field(default_factory=dict)
 
 

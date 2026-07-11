@@ -25,6 +25,42 @@ def _apply_limits() -> None:
     except (ValueError, resource.error):
         pass
 
+    # 1hr of cumulative CPU time — well above any legitimate scan (adapters
+    # already enforce their own wall-clock timeouts, typically <=600s), but
+    # bounds a genuinely stuck/malicious process rather than leaving it
+    # unbounded. Threaded tools (ffuf -t 40, nmap -T4) can accumulate more
+    # CPU-seconds than wall-clock seconds, hence the wide margin.
+    try:
+        resource.setrlimit(resource.RLIMIT_CPU, (3600, 3600))
+    except (ValueError, resource.error):
+        pass
+
+    # 500MB max file size — bounds a runaway output/log file (screenshots and
+    # tool JSON output are always small; raw_output is capped at 100KB at the
+    # application layer already) without touching real usage.
+    try:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (500 * 1024 * 1024, 500 * 1024 * 1024))
+    except (ValueError, resource.error):
+        pass
+
+    # Generous process/thread ceiling — bounds fork-bomb-style abuse. Kept
+    # high (not tight) for the same reason RLIMIT_AS is skipped entirely: Go
+    # binaries (naabu, gowitness) spawn multiple OS threads for their
+    # runtime/GC and a too-low limit here produces the same class of opaque
+    # startup failure.
+    try:
+        resource.setrlimit(resource.RLIMIT_NPROC, (2048, 2048))
+    except (ValueError, resource.error):
+        pass
+
+    # No core dumps — a crashed recon tool's core file could contain
+    # in-memory secrets (e.g. the PDCP API key). Zero-cost, no legitimate
+    # use case relies on this being enabled.
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (ValueError, resource.error):
+        pass
+
 
 def get_preexec_fn() -> Callable[[], None]:
     """Return a preexec_fn for subprocess resource limiting.

@@ -653,7 +653,7 @@ In `infra/docker-compose.yml`, add a new `heavy-worker` service block after the 
     environment:
       DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
       REDIS_URL: redis://redis:6379/0
-      PDCP_API_KEY: ${PDCP_API_KEY:-c10b9f3d-8843-4ed3-b9b0-30a361646270}
+      PDCP_API_KEY: ${PDCP_API_KEY:-}  # redacted 2026-07-11 — see security audit H5; rotate in ProjectDiscovery console
       MINIO_URL: http://minio:9000
       MINIO_PUBLIC_URL: http://localhost:9000
       MINIO_ACCESS_KEY: minioadmin

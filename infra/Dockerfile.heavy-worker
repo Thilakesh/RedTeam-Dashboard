@@ -75,7 +75,7 @@ RUN pip install --no-cache-dir wafw00f==2.3.0 \
 
 # dbip-city-lite — local IP → Country/City MMDB. CC BY 4.0, no signup, monthly refresh.
 # We pin the YYYY-MM in the URL so reproducible builds don't drift; bump it monthly if you care.
-ARG DBIP_MONTH=2026-05
+ARG DBIP_MONTH=2026-07
 RUN mkdir -p /opt/geoip \
     && curl -fsSL -o /opt/geoip/dbip-city-lite.mmdb.gz \
         "https://download.db-ip.com/free/dbip-city-lite-${DBIP_MONTH}.mmdb.gz" \

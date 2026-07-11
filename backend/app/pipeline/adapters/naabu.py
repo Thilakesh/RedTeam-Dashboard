@@ -11,6 +11,7 @@ import shutil
 import sys
 
 from app.pipeline.stage import AssetRecord, StageContext
+from app.services.net_guard import filter_allowed_hosts
 from app.workers.sandbox import get_preexec_fn
 
 
@@ -34,7 +35,9 @@ class NaabuStage:
         if binary is None:
             raise RuntimeError("naabu binary not on PATH")
 
-        hosts = sorted(hosts)[: self._MAX_HOSTS]
+        hosts = filter_allowed_hosts(sorted(hosts)[: self._MAX_HOSTS])
+        if not hosts:
+            return []
 
         proc = await asyncio.create_subprocess_exec(
             binary,
@@ -50,14 +53,14 @@ class NaabuStage:
             preexec_fn=get_preexec_fn() if sys.platform != "win32" else None,
         )
         try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=300)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
         except asyncio.TimeoutError:
             proc.kill()
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5)
             except asyncio.TimeoutError:
                 pass
-            raise RuntimeError("naabu timed out after 300s") from None
+            raise RuntimeError("naabu timed out after 600s") from None
 
         records: list[AssetRecord] = []
         for raw in stdout.decode(errors="replace").splitlines():
