@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user
+from app.core import features
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import Operation
@@ -56,6 +57,8 @@ async def _get_op_for_user(
     op = await op_service.get_operation(db, user.org_id, operation_id)
     if op is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "operation not found")
+    if op.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this operation")
     return op
 
 
@@ -63,7 +66,11 @@ async def _get_op_for_user(
 async def preview_operation(
     req: OperationPreviewRequest,
     user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> CommandPreviewResponse:
+    await features.require(db, user.id, "operations")
+    if req.tool in features.FEATURES:
+        await features.require(db, user.id, req.tool)
     try:
         cmd = op_service.build_preview(
             target_type=req.target_type,
@@ -84,6 +91,9 @@ async def create_operation(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OperationOut:
+    await features.require(db, user.id, "operations")
+    if req.tool in features.FEATURES:
+        await features.require(db, user.id, req.tool)
     try:
         op = await op_service.create_operation(
             db,
@@ -106,7 +116,7 @@ async def list_operations(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OperationsResponse:
-    rows = await op_service.list_operations(db, user.org_id)
+    rows = await op_service.list_operations(db, user.org_id, user.id)
     return OperationsResponse(rows=[_op_out(op) for op in rows])
 
 

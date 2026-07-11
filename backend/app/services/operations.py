@@ -82,11 +82,15 @@ async def create_operation(
     return op
 
 
-async def list_operations(db: AsyncSession, org_id: UUID, limit: int = 200) -> list[Operation]:
+async def list_operations(
+    db: AsyncSession, org_id: UUID, created_by: UUID, limit: int = 200
+) -> list[Operation]:
+    """Own operations only — no role gets blanket org visibility here (matches
+    the Scan IDOR fix: analysts and admins alike only see what they created)."""
     rows = (
         await db.execute(
             select(Operation)
-            .where(Operation.org_id == org_id)
+            .where(Operation.org_id == org_id, Operation.created_by == created_by)
             .order_by(desc(Operation.created_at))
             .limit(limit)
         )
@@ -97,6 +101,9 @@ async def list_operations(db: AsyncSession, org_id: UUID, limit: int = 200) -> l
 async def get_operation(
     db: AsyncSession, org_id: UUID, operation_id: UUID
 ) -> Operation | None:
+    """org_id-scoped only — the caller (app/api/operations.py::_get_op_for_user)
+    layers the created_by ownership check on top, so cross-tenant misses stay
+    404 while same-tenant non-owner hits can be told apart and 403'd."""
     return (
         await db.execute(
             select(Operation).where(

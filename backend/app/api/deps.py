@@ -22,9 +22,12 @@ CSRF_COOKIE = "rt_csrf"
 class CurrentUser:
     """Per-request handle for the authenticated user.
 
-    `org_id` is preserved for backwards compatibility with existing
-    tenant-scoped queries (Scan.org_id, etc.). New code should prefer
-    `scan_filter()` which encodes the admin-vs-analyst visibility rule.
+    `org_id` is the tenant boundary for scoped queries (Scan.org_id, etc.) —
+    a mismatch there should 404 (hides existence across tenants). Ownership
+    (created_by == self.id) is a separate, stricter check every resource
+    endpoint applies on top — no role, including admin, gets blanket
+    visibility across other users' scans/operations/workspaces; a same-org
+    resource that exists but isn't yours should 403, not silently 404.
     """
 
     def __init__(self, user: User, jti: UUID, session_id: UUID):
@@ -36,14 +39,6 @@ class CurrentUser:
         self.jti: UUID = jti
         self.session_id: UUID = session_id
         self._user = user
-
-    def scan_filter(self, model_column) -> bool:
-        """Helper for query .where(...). Admin sees all; analyst sees only own."""
-        from sqlalchemy import true
-
-        if self.is_admin:
-            return true()
-        return model_column == self.id
 
 
 async def _resolve_current_user(request: Request, db: AsyncSession) -> CurrentUser:
@@ -126,17 +121,14 @@ def require_admin():
     return require_role(UserRole.admin)
 
 
-def require_feature(feature_name: str):
-    """Gate the route on whether feature_name is enabled for this user."""
+def require_feature(*feature_names: str):
+    """Gate the route on whether every feature_name is enabled for this user."""
 
     async def _dep(
         user: CurrentUser = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> CurrentUser:
-        if not await features.is_enabled(db, user.id, feature_name):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, f"feature '{feature_name}' disabled for this user"
-            )
+        await features.require(db, user.id, *feature_names)
         return user
 
     return _dep

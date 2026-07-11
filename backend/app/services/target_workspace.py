@@ -89,22 +89,22 @@ async def create_or_get_workspace(
 
 
 async def list_workspaces_for_org(
-    db: AsyncSession, org_id: UUID, owner_filter=None
+    db: AsyncSession, org_id: UUID, created_by: UUID
 ) -> list[dict]:
     """Return list rows for the /target-workspaces index page.
 
-    ``owner_filter`` is an optional extra SQLAlchemy boolean clause (pass
-    ``user.scan_filter(TargetWorkspace.created_by)`` from the API layer) so
-    analysts only see their own workspaces; admins pass none/true.
+    Own workspaces only — no role gets blanket org visibility (matches the
+    Scan/Operation IDOR fix: analysts and admins alike only see what they
+    created).
     """
-    conditions = [TargetWorkspace.org_id == org_id]
-    if owner_filter is not None:
-        conditions.append(owner_filter)
     rows = (
         await db.execute(
             select(TargetWorkspace, Target.domain)
             .join(Target, Target.id == TargetWorkspace.target_id)
-            .where(*conditions)
+            .where(
+                TargetWorkspace.org_id == org_id,
+                TargetWorkspace.created_by == created_by,
+            )
             .order_by(desc(TargetWorkspace.created_at))
             .limit(200)
         )
