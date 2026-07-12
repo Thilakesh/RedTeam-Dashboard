@@ -22,8 +22,9 @@ from app.api.deps import (
 from app.core import features
 from app.core.config import get_settings
 from app.core.db import get_db
+from app.core.rate_limit import rate_limit
 from app.core.redis import get_redis
-from app.core.security import verify_password
+from app.core.security import dummy_hash, verify_password
 from app.core.tokens import create_access_token, generate_csrf_token
 from app.models import User
 from app.models.auth import RefreshSession
@@ -154,7 +155,11 @@ async def _me_payload(db: AsyncSession, user: User) -> MeResponse:
 # ---------------- endpoints ----------------
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    dependencies=[Depends(rate_limit("login", max_requests=10, window_seconds=300))],
+)
 async def login(
     req: LoginRequest,
     request: Request,
@@ -162,7 +167,13 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
     user = await db.scalar(select(User).where(User.email == req.email))
-    if user is None or user.password_hash is None or not verify_password(req.password, user.password_hash):
+    # Always run bcrypt, even for a missing user / invited-but-not-accepted
+    # user (password_hash is None) — otherwise that path short-circuits
+    # before bcrypt runs and responds measurably faster, letting an attacker
+    # enumerate valid emails by timing alone.
+    password_hash = user.password_hash if user and user.password_hash else dummy_hash()
+    password_ok = verify_password(req.password, password_hash)
+    if user is None or user.password_hash is None or not password_ok:
         await audit.log(
             db,
             action="auth.login_failed",
@@ -187,7 +198,13 @@ async def login(
     return LoginResponse(csrf_token=csrf, user=await _me_payload(db, user))
 
 
-@router.post("/refresh", response_model=LoginResponse)
+@router.post(
+    "/refresh",
+    response_model=LoginResponse,
+    # Higher ceiling than login: the frontend calls this automatically near
+    # token expiry (every ~10min access-token lifetime) as normal traffic.
+    dependencies=[Depends(rate_limit("refresh", max_requests=30, window_seconds=300))],
+)
 async def refresh(
     request: Request,
     response: Response,
@@ -279,7 +296,11 @@ async def me(
     return await _me_payload(db, full)
 
 
-@router.post("/invite/accept", response_model=LoginResponse)
+@router.post(
+    "/invite/accept",
+    response_model=LoginResponse,
+    dependencies=[Depends(rate_limit("invite_accept", max_requests=10, window_seconds=300))],
+)
 async def accept_invite(
     req: InviteAcceptRequest,
     request: Request,

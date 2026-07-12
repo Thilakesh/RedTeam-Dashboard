@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,16 +21,23 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 14
 
     # Cookie config — secure must be true in prod, off for local http://localhost.
-    cookie_secure: bool = False
+    # Defaults secure (fail-safe): local dev's docker-compose.yml explicitly
+    # sets COOKIE_SECURE=false, so this only changes behavior for a
+    # deployment that forgets to set it at all.
+    cookie_secure: bool = True
     cookie_domain: str = ""  # empty → host-only (correct for localhost)
 
     # Admin bootstrap (run on backend startup if no admin exists).
-    admin_email: str = "alpha@gmail.com"
-    admin_password: str = "Testing123@"
+    # No hardcoded credential defaults: if ADMIN_EMAIL is unset, bootstrap is
+    # skipped (see main._ensure_bootstrap_admin); if ADMIN_PASSWORD is unset,
+    # a random one is generated and logged once at boot rather than falling
+    # back to a known password.
+    admin_email: str = ""
+    admin_password: str = ""
 
     # Super-admin: cannot be disabled, demoted, or deleted by other admins.
-    # Defaults to the bootstrap admin email; overridable via env.
-    super_admin_email: str = "alpha@gmail.com"
+    # Falls back to admin_email (below) when unset — see _resolve_super_admin.
+    super_admin_email: str = ""
 
     # Singleton org under which every user lives now that org signup is gone.
     default_org_name: str = "Default Organization"
@@ -49,6 +56,12 @@ class Settings(BaseSettings):
     minio_bucket: str = "recon"
     openrouter_api_key: str = ""          # required for deep scans; set via OPENROUTER_API_KEY env
     bbot_timeout: int = 1800
+
+    @model_validator(mode="after")
+    def _resolve_super_admin(self) -> "Settings":
+        if not self.super_admin_email:
+            self.super_admin_email = self.admin_email
+        return self
 
 
 @lru_cache

@@ -3,24 +3,22 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useTheme } from "next-themes";
 import {
   Bell,
   ChevronRight,
   Crosshair,
   FileBarChart2,
   LayoutDashboard,
-  Moon,
   Plus,
   Radar,
   Rocket,
   ScanSearch,
   Settings,
-  Sun,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useAuth } from "@/lib/auth-context";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +34,8 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
   children?: { href: string; label: string }[];
   adminOnly?: boolean;
+  feature?: string;
+  badge?: string;
 };
 
 const NAV_MAIN: NavItem[] = [
@@ -44,6 +44,7 @@ const NAV_MAIN: NavItem[] = [
     href: "/dashboard",
     label: "Basic Recon",
     icon: ScanSearch,
+    feature: "recon",
     children: [
       { href: "/dashboard", label: "Add Scan" },
       { href: "/dashboard/recon-jobs", label: "Recon Jobs" },
@@ -53,18 +54,20 @@ const NAV_MAIN: NavItem[] = [
     href: "/targets",
     label: "Target Workspace",
     icon: Crosshair,
+    feature: "target_workspace",
     children: [{ href: "/targets", label: "Assets" }],
   },
   {
     href: "/operations",
     label: "Operations",
     icon: Rocket,
+    feature: "operations",
     children: [
       { href: "/operations/launch", label: "Launch Operation" },
       { href: "/operations", label: "Operation History" },
     ],
   },
-  { href: "/reports", label: "Reports", icon: FileBarChart2 },
+  { href: "/reports", label: "Reports", icon: FileBarChart2, badge: "Dev" },
   {
     href: "/settings",
     label: "Settings",
@@ -143,7 +146,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function Sidebar({ pathname, isAdmin }: { pathname: string; isAdmin: boolean }) {
-  const { user } = useAuth();
+  const { user, hasFeature } = useAuth();
+  const navMain = NAV_MAIN.filter((item) => !item.feature || hasFeature(item.feature));
   return (
     <aside className="w-60 shrink-0 bg-sidebar text-sidebar-foreground border-r border-black/30 flex flex-col">
       <div className="px-5 h-16 flex items-center gap-2 border-b border-white/5">
@@ -154,7 +158,7 @@ function Sidebar({ pathname, isAdmin }: { pathname: string; isAdmin: boolean }) 
       </div>
       <div className="px-3 py-3 text-xxs uppercase tracking-wider text-white/40">Main</div>
       <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-        {NAV_MAIN.map((item) => (
+        {navMain.map((item) => (
           <NavRow key={item.href} item={item} pathname={pathname} />
         ))}
         {isAdmin && (
@@ -198,6 +202,11 @@ function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
         <Link href={item.href} className={rowClass}>
           <Icon className="h-4 w-4" />
           <span className="flex-1 text-left">{item.label}</span>
+          {item.badge && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-white/60">
+              {item.badge}
+            </span>
+          )}
         </Link>
       )}
       {hasChildren && open && (
@@ -246,6 +255,7 @@ function TopBar({
   role: string;
   onLogout: () => void;
 }) {
+  const { hasFeature } = useAuth();
   const initial = (email || "?").trim()[0]?.toUpperCase() ?? "?";
   return (
     <header className="h-16 px-8 flex items-center justify-between border-b border-border bg-background">
@@ -258,12 +268,14 @@ function TopBar({
         ))}
       </nav>
       <div className="flex items-center gap-2">
-        <Link
-          href="/dashboard"
-          className="hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" /> New Scan
-        </Link>
+        {hasFeature("recon") && (
+          <Link
+            href="/dashboard"
+            className="hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" /> New Scan
+          </Link>
+        )}
         <ThemeToggle />
         <button className="h-9 w-9 rounded-md hover:bg-accent grid place-items-center text-muted-foreground hover:text-foreground">
           <Bell className="h-4 w-4" />
@@ -288,22 +300,5 @@ function TopBar({
         </DropdownMenu>
       </div>
     </header>
-  );
-}
-
-function ThemeToggle() {
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return <div className="h-9 w-9" />;
-  const dark = (theme === "system" ? resolvedTheme : theme) === "dark";
-  return (
-    <button
-      onClick={() => setTheme(dark ? "light" : "dark")}
-      className="h-9 w-9 rounded-md hover:bg-accent grid place-items-center text-muted-foreground hover:text-foreground"
-      aria-label="Toggle theme"
-    >
-      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-    </button>
   );
 }

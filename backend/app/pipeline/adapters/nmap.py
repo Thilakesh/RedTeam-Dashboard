@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from app.pipeline.stage import AssetRecord, StageContext
+from app.services.net_guard import filter_allowed_hosts
 from app.workers.sandbox import get_preexec_fn
 
 
@@ -49,7 +50,7 @@ class NmapStage:
             except (ValueError, IndexError):
                 continue
 
-        hosts = sorted(host_ports.keys())[: self._MAX_HOSTS]
+        hosts = filter_allowed_hosts(sorted(host_ports.keys())[: self._MAX_HOSTS])
         records: list[AssetRecord] = []
 
         for host in hosts:

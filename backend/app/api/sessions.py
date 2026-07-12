@@ -60,10 +60,10 @@ async def revoke_session(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     row = await db.get(RefreshSession, session_id)
-    if row is None:
+    # Same 404 for "doesn't exist" and "exists but isn't yours" — a 403 here
+    # would let a non-admin enumerate valid session ids by probing UUIDs.
+    if row is None or (not user.is_admin and row.user_id != user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
-    if not user.is_admin and row.user_id != user.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
     reason = "admin_revoke" if user.is_admin and row.user_id != user.id else "user_revoke"
     await session_svc.revoke_one(db, session_id=session_id, reason=reason)
     await audit.log(

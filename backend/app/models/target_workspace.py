@@ -33,6 +33,12 @@ class TargetWorkspace(Base):
         ForeignKey("scans.id", ondelete="SET NULL"),
         nullable=True,
     )
+    created_by: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     label: Mapped[str] = mapped_column(String(120), nullable=False)
     status: Mapped[WorkspaceStatus] = mapped_column(
         Enum(WorkspaceStatus, name="workspace_status", create_type=False),

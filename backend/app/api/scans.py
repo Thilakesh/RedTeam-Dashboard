@@ -11,9 +11,11 @@ from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import CurrentUser, get_current_user, get_current_user_sse
+from app.core import features
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import Asset, AssetObservation, Project, Scan, ScanStatus, Target
+from app.pipeline.profiles import stages_for
 from app.schemas.findings import FindingsPage
 from app.schemas.scan import AssetOut, ScanCreateRequest, ScanDetailOut, ScanOut, ScanUpdateRequest
 from app.schemas.subdomain_view import (
@@ -27,6 +29,7 @@ from app.schemas.subdomain_view import (
     TechBucket,
 )
 from app.services import audit, scan_view
+from app.services.net_guard import assert_target_allowed
 from app.services.queue import enqueue_scan
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -58,21 +61,26 @@ def _to_scan_out(scan: Scan, domain: str) -> ScanOut:
 async def _get_scan_and_domain(
     db: AsyncSession, scan_id: UUID, user: CurrentUser
 ) -> tuple[Scan, str]:
-    """Returns (scan, domain). Analyst sees only own scans."""
+    """Returns (scan, domain). Ownership is strict for scans — unlike
+    TargetWorkspace, admins do NOT get blanket org visibility here: every
+    role, including admin, may only access scans they created themselves.
+    org_id is still the tenant boundary (404 across tenants, so existence
+    isn't leaked cross-org); created_by is the authorization boundary within
+    the tenant (403, per the IDOR fix — a scan that exists but isn't yours
+    should say so, not pretend it doesn't exist)."""
     row = (
         await db.execute(
             select(Scan, Target.domain)
             .join(Target, Target.id == Scan.target_id)
-            .where(
-                Scan.id == scan_id,
-                Scan.org_id == user.org_id,
-                user.scan_filter(Scan.created_by),
-            )
+            .where(Scan.id == scan_id, Scan.org_id == user.org_id)
         )
     ).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")
-    return row.Scan, row.domain
+    scan, domain = row.Scan, row.domain
+    if scan.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this scan")
+    return scan, domain
 
 
 @router.post("", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
@@ -81,12 +89,23 @@ async def create_scan(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
+    await features.require(db, user.id, "recon")
+    if req.profile == "deep":
+        await features.require(db, user.id, "deep_scan")
+    tool_names = {s.name for s in stages_for(req.profile)}
+    await features.require(db, user.id, *tool_names)
+
     project_id = await _default_project_id(db, user.org_id)
 
     # Normalize domain (lowercase + strip) so it matches the verified-targets
     # store, which also stores lowercase. Mismatched case otherwise created a
     # fresh unverified Target row and tripped the aggressive-scan gate.
+    # (req.domain is already normalized by ScanCreateRequest's validator.)
     domain = req.domain.strip().lower()
+    try:
+        assert_target_allowed(domain)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
     target = await db.scalar(
         select(Target).where(Target.project_id == project_id, Target.domain == domain)
     )
@@ -122,10 +141,7 @@ async def list_scans(
         await db.execute(
             select(Scan, Target.domain)
             .join(Target, Target.id == Scan.target_id)
-            .where(
-                Scan.org_id == user.org_id,
-                user.scan_filter(Scan.created_by),
-            )
+            .where(Scan.org_id == user.org_id, Scan.created_by == user.id)
             .order_by(desc(Scan.created_at))
             .limit(100)
         )
@@ -237,10 +253,12 @@ async def get_scan(
     scan = await db.scalar(
         select(Scan)
         .options(selectinload(Scan.stages))
-        .where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
+        .where(Scan.id == scan_id, Scan.org_id == user.org_id)
     )
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
+    if scan.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this scan")
     target = await db.get(Target, scan.target_id)
     base = _to_scan_out(scan, target.domain if target else "")
     return ScanDetailOut(**base.model_dump(), stages=scan.stages)
@@ -253,10 +271,12 @@ async def list_scan_assets(
     db: AsyncSession = Depends(get_db),
 ) -> list[AssetOut]:
     scan = await db.scalar(
-        select(Scan).where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
+        select(Scan).where(Scan.id == scan_id, Scan.org_id == user.org_id)
     )
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
+    if scan.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this scan")
 
     rows = await db.execute(
         select(Asset)
@@ -269,11 +289,13 @@ async def list_scan_assets(
 
 
 async def _ensure_scan_visible(db: AsyncSession, scan_id: UUID, user: CurrentUser) -> None:
-    exists = await db.scalar(
-        select(Scan.id).where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
+    scan = await db.scalar(
+        select(Scan).where(Scan.id == scan_id, Scan.org_id == user.org_id)
     )
-    if exists is None:
+    if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
+    if scan.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this scan")
 
 
 @router.get("/{scan_id}/subdomains", response_model=SubdomainsPage)
@@ -388,10 +410,12 @@ async def stream_scan(
     db: AsyncSession = Depends(get_db),
 ):
     scan = await db.scalar(
-        select(Scan.id).where(Scan.id == scan_id, Scan.org_id == user.org_id, user.scan_filter(Scan.created_by))
+        select(Scan).where(Scan.id == scan_id, Scan.org_id == user.org_id)
     )
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "scan not found")
+    if scan.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this scan")
 
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
     channel = f"scan:{scan_id}"

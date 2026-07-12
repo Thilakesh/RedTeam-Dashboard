@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.schemas.base import StrictRequest
+
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -20,7 +22,7 @@ class UserOut(BaseModel):
     has_pending_invite: bool = False
 
 
-class UserCreateRequest(BaseModel):
+class UserCreateRequest(StrictRequest):
     email: EmailStr
     first_name: str | None = Field(default=None, max_length=80)
     last_name: str | None = Field(default=None, max_length=80)
@@ -33,7 +35,7 @@ class UserCreateResponse(BaseModel):
     invite_url: str
 
 
-class UserPatchRequest(BaseModel):
+class UserPatchRequest(StrictRequest):
     first_name: str | None = Field(default=None, max_length=80)
     last_name: str | None = Field(default=None, max_length=80)
     role: str | None = Field(default=None, pattern="^(admin|analyst)$")
@@ -45,7 +47,7 @@ class FeatureRow(BaseModel):
     enabled: bool
 
 
-class FeatureSetRequest(BaseModel):
+class FeatureSetRequest(StrictRequest):
     enabled: bool
 
 
@@ -78,7 +80,7 @@ class AuditOut(BaseModel):
     created_at: datetime
 
 
-class ProfileUpdateRequest(BaseModel):
+class ProfileUpdateRequest(StrictRequest):
     email: EmailStr | None = None
     first_name: str | None = Field(default=None, max_length=80)
     last_name: str | None = Field(default=None, max_length=80)
@@ -92,7 +94,7 @@ class SystemSettingsOut(BaseModel):
     jwt_refresh_expire_days: int
 
 
-class SystemSettingsPatchRequest(BaseModel):
+class SystemSettingsPatchRequest(StrictRequest):
     """Only mutable knobs surfaced for now; everything else is env-controlled."""
 
     bbot_timeout: int | None = Field(default=None, ge=60, le=14400)
@@ -106,12 +108,12 @@ class OpenRouterSettingsOut(BaseModel):
     default_model: str
 
 
-class OpenRouterSettingsUpdateRequest(BaseModel):
+class OpenRouterSettingsUpdateRequest(StrictRequest):
     api_key: str | None = Field(default=None, max_length=300)
     default_model: str | None = Field(default=None, max_length=120)
 
 
-class OpenRouterTestRequest(BaseModel):
+class OpenRouterTestRequest(StrictRequest):
     api_key: str | None = Field(default=None, max_length=300)
     default_model: str | None = Field(default=None, max_length=120)
 

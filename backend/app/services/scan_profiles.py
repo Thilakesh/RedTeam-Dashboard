@@ -217,17 +217,22 @@ def resolve_args(tool: str, params: dict) -> list[str]:
       2. profile.args when profile is a known id
       3. default profile's args
       4. empty list (adapter falls back to whatever it hardcodes)
+
+    This is the single choke point every execution path (Operations preview,
+    Operations execution, investigation tasks) goes through, so custom args
+    are allow-list-validated here regardless of whether an upstream API
+    handler already validated them — defense in depth, fails closed.
     """
     import shlex
+
+    from app.services.tool_args import validate_custom_args
 
     profile_id = params.get("profile")
     if profile_id == "custom":
         custom = params.get("custom_args") or ""
         if isinstance(custom, str) and custom.strip():
-            try:
-                return shlex.split(custom)
-            except ValueError:
-                return []
+            validate_custom_args(tool, custom)
+            return shlex.split(custom)
         return []
     spec = get_profile(tool, profile_id)
     return list(spec["args"]) if spec else []

@@ -44,8 +44,15 @@ async def create_or_get_workspace(
     parent_scan_id: UUID,
     org_id: UUID,
     target_domain: str,
+    created_by: UUID | None = None,
 ) -> TargetWorkspace:
-    """Idempotent: returns existing workspace if (target_id, parent_scan_id) row exists."""
+    """Idempotent: returns existing workspace if (target_id, parent_scan_id) row exists.
+
+    Idempotency is keyed only on (target_id, parent_scan_id), not created_by —
+    but the caller (create_workspace) already scopes the parent-scan lookup by
+    the analyst's own scans, so two different analysts can never race to
+    create/reuse the same workspace row in the first place.
+    """
     existing = await db.scalar(
         select(TargetWorkspace).where(
             TargetWorkspace.target_id == target_id,
@@ -59,6 +66,7 @@ async def create_or_get_workspace(
         org_id=org_id,
         target_id=target_id,
         parent_scan_id=parent_scan_id,
+        created_by=created_by,
         label=_workspace_label(parent_scan_id, target_domain),
     )
     db.add(ws)
@@ -81,14 +89,22 @@ async def create_or_get_workspace(
 
 
 async def list_workspaces_for_org(
-    db: AsyncSession, org_id: UUID
+    db: AsyncSession, org_id: UUID, created_by: UUID
 ) -> list[dict]:
-    """Return list rows for the /target-workspaces index page."""
+    """Return list rows for the /target-workspaces index page.
+
+    Own workspaces only — no role gets blanket org visibility (matches the
+    Scan/Operation IDOR fix: analysts and admins alike only see what they
+    created).
+    """
     rows = (
         await db.execute(
             select(TargetWorkspace, Target.domain)
             .join(Target, Target.id == TargetWorkspace.target_id)
-            .where(TargetWorkspace.org_id == org_id)
+            .where(
+                TargetWorkspace.org_id == org_id,
+                TargetWorkspace.created_by == created_by,
+            )
             .order_by(desc(TargetWorkspace.created_at))
             .limit(200)
         )

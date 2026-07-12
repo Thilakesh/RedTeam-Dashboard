@@ -1,8 +1,11 @@
 """Target Workspace API.
 
 Layered above completed recon scans; analyst-driven per-asset investigation.
-Tenant isolation via the denormalized TargetWorkspace.org_id column (mirrors
-Scan.org_id pattern in app/api/scans.py).
+Tenant isolation via the denormalized TargetWorkspace.org_id column (404 on
+mismatch — hides existence across orgs), plus strict per-owner isolation via
+TargetWorkspace.created_by (403 on mismatch within the org). No role gets
+blanket org visibility, including admin — mirrors the Scan/Operation IDOR
+fix in app/api/scans.py and app/api/operations.py exactly.
 """
 from __future__ import annotations
 
@@ -16,7 +19,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.deps import CurrentUser, get_current_user, get_current_user_sse
+from app.api.deps import CurrentUser, get_current_user, get_current_user_sse, require_feature
+from app.core import features
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import (
@@ -44,6 +48,8 @@ from app.schemas.target_workspace import (
 from app.services import audit
 from app.services import target_workspace as ws_service
 from app.services import investigation_tasks as task_service
+from app.services.net_guard import assert_target_allowed
+from app.services.tool_args import validate_custom_args
 
 router = APIRouter(prefix="/target-workspaces", tags=["target-workspaces"])
 
@@ -63,7 +69,8 @@ async def get_scan_profiles() -> dict:
 async def _get_workspace_for_user(
     workspace_id: UUID, db: AsyncSession, user: CurrentUser
 ) -> tuple[TargetWorkspace, str]:
-    """Returns (workspace, target_domain). 404 on miss/foreign-org."""
+    """Returns (workspace, target_domain). 404 on miss/foreign-org (hides
+    cross-tenant existence); 403 if it exists in-org but isn't yours."""
     row = (
         await db.execute(
             select(TargetWorkspace, Target.domain)
@@ -76,6 +83,8 @@ async def _get_workspace_for_user(
     ).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "workspace not found")
+    if row.TargetWorkspace.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this workspace")
     return row.TargetWorkspace, row.domain
 
 
@@ -94,7 +103,7 @@ def _workspace_out(ws: TargetWorkspace, domain: str) -> WorkspaceOut:
 @router.post("", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
 async def create_workspace(
     req: WorkspaceCreateRequest,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_feature("target_workspace")),
     db: AsyncSession = Depends(get_db),
 ) -> WorkspaceOut:
     """Idempotent: returns existing workspace if (target, parent_scan) match."""
@@ -102,14 +111,13 @@ async def create_workspace(
         await db.execute(
             select(Scan, Target.domain)
             .join(Target, Target.id == Scan.target_id)
-            .where(
-                Scan.id == req.parent_scan_id,
-                Scan.org_id == user.org_id,
-            )
+            .where(Scan.id == req.parent_scan_id, Scan.org_id == user.org_id)
         )
     ).first()
     if parent_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "parent recon scan not found")
+    if parent_row.Scan.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this scan")
 
     parent_scan, target_domain = parent_row.Scan, parent_row.domain
     if parent_scan.status != ScanStatus.completed:
@@ -123,6 +131,7 @@ async def create_workspace(
         parent_scan_id=parent_scan.id,
         org_id=user.org_id,
         target_domain=target_domain,
+        created_by=user.id,
     )
     return _workspace_out(ws, target_domain)
 
@@ -132,7 +141,7 @@ async def list_workspaces(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[WorkspaceListRow]:
-    rows = await ws_service.list_workspaces_for_org(db, user.org_id)
+    rows = await ws_service.list_workspaces_for_org(db, user.org_id, user.id)
     return [WorkspaceListRow(**r) for r in rows]
 
 
@@ -238,6 +247,10 @@ async def create_investigation_task(
 ) -> InvestigationTaskOut:
     ws, _ = await _get_workspace_for_user(workspace_id, db, user)
 
+    await features.require(db, user.id, "target_workspace", "investigations")
+    if req.tool in features.FEATURES:
+        await features.require(db, user.id, req.tool)
+
     # Asset must belong to the same target as the workspace.
     asset = await db.get(Asset, req.asset_id)
     if asset is None or asset.target_id != ws.target_id:
@@ -249,12 +262,35 @@ async def create_investigation_task(
             f"tool '{req.tool}' is not applicable to this asset",
         )
 
+    # Assets come from legitimate recon, but a spoofed/malicious DNS response
+    # during that recon could still seed one resolving to platform
+    # infrastructure or a cloud-metadata address. Guard before enqueueing.
+    try:
+        assert_target_allowed(asset.canonical_key)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+    # Unlike Operations, this path previously forwarded req.params straight to
+    # the adapter with no validation at all. Restrict to the known-safe keys
+    # (drops any "wordlist" override, which let a client point ffuf/dirsearch
+    # at an arbitrary local file) and allow-list-validate custom_args — the
+    # same check scan_profiles.resolve_args re-applies at execution time.
+    safe_params = {
+        k: v for k, v in (req.params or {}).items()
+        if k in ("profile", "protocol", "port", "custom_args")
+    }
+    try:
+        if safe_params.get("profile") == "custom":
+            validate_custom_args(req.tool, safe_params.get("custom_args"))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
     task = await task_service.create_and_enqueue_task(
         db,
         workspace_id=ws.id,
         asset_id=asset.id,
         tool=req.tool,
-        params=req.params,
+        params=safe_params,
     )
     return InvestigationTaskOut(
         id=task.id,
@@ -394,14 +430,16 @@ async def stream_workspace_tasks(
     """SSE: aggregates `investigation:{task_id}` channel events for all
     tasks in this workspace. Uses Redis psubscribe over channel pattern
     `investigation:*` then filters by workspace via Redis SET membership."""
-    exists = await db.scalar(
-        select(TargetWorkspace.id).where(
+    ws = await db.scalar(
+        select(TargetWorkspace).where(
             TargetWorkspace.id == workspace_id,
             TargetWorkspace.org_id == user.org_id,
         )
     )
-    if exists is None:
+    if ws is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "workspace not found")
+    if ws.created_by != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "you do not have access to this workspace")
 
     redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
     workspace_set_key = f"workspace:{workspace_id}:tasks"

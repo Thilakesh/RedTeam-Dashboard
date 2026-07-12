@@ -1,11 +1,21 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { ApiError, acceptInvite } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={null}>
+      <AcceptInviteForm />
+    </Suspense>
+  );
+}
+
+function AcceptInviteForm() {
   const router = useRouter();
   const params = useSearchParams();
   const token = params.get("token") || "";
@@ -42,42 +52,36 @@ export default function AcceptInvitePage() {
   if (!token) {
     return (
       <div className="space-y-3">
-        <h1 className="text-2xl font-semibold">Invalid invite</h1>
-        <p className="text-neutral-400 text-sm">No invite token in the URL.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Invalid invite</h1>
+        <p className="text-muted-foreground text-sm">No invite token in the URL.</p>
       </div>
     );
   }
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <h1 className="text-2xl font-semibold">Set your password</h1>
-      <p className="text-sm text-neutral-400">
+      <h1 className="text-2xl font-semibold text-foreground">Set your password</h1>
+      <p className="text-sm text-muted-foreground">
         Welcome. Choose a password to activate your account.
       </p>
-      <input
+      <Input
         type="password"
         required
         placeholder="new password (min 8 chars)"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2"
       />
-      <input
+      <Input
         type="password"
         required
         placeholder="confirm password"
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
-        className="w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2"
       />
-      {err && <p className="text-red-400 text-sm">{err}</p>}
-      <button
-        type="submit"
-        disabled={busy}
-        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded py-2 font-medium"
-      >
+      {err && <p className="text-destructive text-sm">{err}</p>}
+      <Button type="submit" disabled={busy} className="w-full">
         {busy ? "Activating..." : "Activate account"}
-      </button>
+      </Button>
     </form>
   );
 }

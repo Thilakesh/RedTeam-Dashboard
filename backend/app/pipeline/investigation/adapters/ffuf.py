@@ -37,7 +37,7 @@ from app.pipeline.investigation.stage import (
     InvestigationResult,
     TaskContext,
 )
-from app.pipeline.vuln.adapters.endpoint_classifier import _classify
+from app.pipeline.investigation.endpoint_classifier import _classify
 from app.workers.sandbox import get_preexec_fn
 
 log = logging.getLogger(__name__)
@@ -61,7 +61,10 @@ class FfufAdapter:
         if binary is None:
             return _tool_error_result("ffuf binary not found on PATH")
 
-        wordlist = ctx.params.get("wordlist") or _DEFAULT_WORDLIST
+        # Wordlist is never client-controllable: an attacker-chosen path here
+        # would let ffuf read arbitrary local files (their matched lines leak
+        # back via ffuf's own JSON output). Always the server-side default.
+        wordlist = _DEFAULT_WORDLIST
         if not Path(wordlist).is_file():
             return _tool_error_result(f"wordlist missing: {wordlist}")
 
@@ -69,6 +72,13 @@ class FfufAdapter:
         if protocol not in {"http", "https"}:
             protocol = "https"
         host = ctx.asset_canonical_key
+
+        from app.services.net_guard import assert_target_allowed
+
+        try:
+            assert_target_allowed(host)
+        except ValueError as e:
+            return _tool_error_result(str(e))
 
         port = ctx.params.get("port")
         if port is not None:
