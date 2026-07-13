@@ -281,6 +281,7 @@ export type FindingRow = {
 export type FindingsPage = {
   total: number;
   items: FindingRow[];
+  severity_counts: Record<string, number>;
 };
 
 export async function startScan(scanId: string): Promise<Scan> {
@@ -593,6 +594,42 @@ export async function cancelOperation(operation_id: string): Promise<Operation> 
 
 export async function retryOperation(operation_id: string): Promise<Operation> {
   return api<Operation>(`/operations/${operation_id}/retry`, { method: "POST" });
+}
+
+// --- Dashboard ----------------------------------------------------------------
+
+export type ScanActivityDay = { day: string; completed: number };
+
+export type RecentScanRow = {
+  id: string;
+  domain: string;
+  profile: string;
+  status: string;
+  progress_pct: number;
+  created_at: string;
+};
+
+export type TopFindingRow = {
+  scan_id: string;
+  fqdn: string;
+  severity: string;
+  risk_score: number;
+  rationale: string;
+};
+
+export type DashboardSummary = {
+  active_scans: number;
+  assets_tracked: number;
+  open_findings: number;
+  workspaces: number;
+  severity_counts: Record<string, number>;
+  scan_activity: ScanActivityDay[];
+  recent_scans: RecentScanRow[];
+  top_findings: TopFindingRow[];
+};
+
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  return api<DashboardSummary>("/dashboard/summary");
 }
 
 // --- Admin: OpenRouter settings ----------------------------------------------

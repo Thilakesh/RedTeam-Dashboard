@@ -13,7 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ShieldAlert } from "lucide-react";
+import { Cloud, Globe2, Layers, ShieldAlert, ShieldCheck, Wrench } from "lucide-react";
 import Link from "next/link";
 import { api, type FindingsPage, type ScanDetail, type ScanOverview } from "@/lib/api";
 
@@ -46,11 +46,11 @@ export function OverviewTab({ scanId, scan }: { scanId: string; scan?: ScanDetai
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <CountCard label="Subdomains" value={data.subdomain_count} />
-        <CountCard label="IPs" value={data.ip_count} />
-        <CountCard label="Behind CDN" value={data.cdn_count} />
-        <CountCard label="With WAF" value={data.waf_count} />
-        <CountCard label="Technologies" value={data.tech_count} />
+        <CountCard label="Subdomains" value={data.subdomain_count} icon={Layers} tone="text-primary bg-primary/10" />
+        <CountCard label="IPs" value={data.ip_count} icon={Globe2} tone="text-info bg-info/10" />
+        <CountCard label="Behind CDN" value={data.cdn_count} icon={Cloud} tone="text-info bg-info/10" />
+        <CountCard label="With WAF" value={data.waf_count} icon={ShieldCheck} tone="text-success bg-success/10" />
+        <CountCard label="Technologies" value={data.tech_count} icon={Wrench} tone="text-warning bg-warning/10" />
       </div>
 
       {/* Top Risks — only for completed deep scans */}
@@ -186,11 +186,24 @@ export function OverviewTab({ scanId, scan }: { scanId: string; scan?: ScanDetai
   );
 }
 
-function CountCard({ label, value }: { label: string; value: number }) {
+function CountCard({
+  label,
+  value,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
+}) {
   return (
     <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <div className="text-xxs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-2xl font-semibold mt-1 tabular-nums">{value}</div>
+      <div className={`h-8 w-8 rounded-md flex items-center justify-center mb-2.5 ${tone}`}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="text-xs text-muted-foreground mt-0.5">{label}</div>
     </div>
   );
 }

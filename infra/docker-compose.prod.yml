@@ -52,6 +52,7 @@ services:
       JWT_REFRESH_EXPIRE_DAYS: "14"
       COOKIE_SECURE: "true"
       COOKIE_DOMAIN: thilakesh.in
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       SUPER_ADMIN_EMAIL: ${ADMIN_EMAIL}
@@ -91,6 +92,7 @@ services:
       MINIO_BUCKET: recon
       MINIO_USE_SIGNED_URLS: "true"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,6 +118,7 @@ services:
       MINIO_USE_SIGNED_URLS: "true"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ARQ_QUEUE_NAME: heavy
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,6 +135,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://recon:${POSTGRES_PASSWORD}@postgres:5432/recon
       REDIS_URL: redis://redis:6379/0
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy

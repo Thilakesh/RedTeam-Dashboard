@@ -397,10 +397,10 @@ async def get_scan_findings(
     """Prioritized risk findings for a deep scan, ordered by priority_rank ASC."""
     await _ensure_scan_visible(db, scan_id, user)
     offset = (page - 1) * limit
-    total, items = await scan_view.build_findings(
+    total, items, severity_counts = await scan_view.build_findings(
         db, scan_id, severity=severity, offset=offset, limit=limit
     )
-    return FindingsPage(total=total, items=items)
+    return FindingsPage(total=total, items=items, severity_counts=severity_counts)
 
 
 @router.get("/{scan_id}/stream")

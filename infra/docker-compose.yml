@@ -59,6 +59,7 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-alpha@gmail.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Testing123@}
       CORS_ORIGINS: '["http://localhost:3000"]'
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     ports:
       - "8000:8000"
     depends_on:
@@ -91,6 +92,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: recon
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,6 +118,7 @@ services:
       MINIO_BUCKET: recon
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ARQ_QUEUE_NAME: heavy
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,6 +137,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
       REDIS_URL: redis://redis:6379/0
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy

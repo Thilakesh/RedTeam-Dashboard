@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.api import (
     auth,
+    dashboard as dashboard_api,
     operations as operations_api,
     scans,
     sessions as sessions_api,
@@ -46,6 +47,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(dashboard_api.router)
 app.include_router(users_api.router)
 app.include_router(sessions_api.router)
 app.include_router(settings_api.router)

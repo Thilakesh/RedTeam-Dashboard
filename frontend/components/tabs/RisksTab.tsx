@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, ShieldAlert } from "lucide-react";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RTooltip } from "recharts";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -13,11 +15,27 @@ import {
 } from "@/components/ui/select";
 import { ApiError, api, type FindingRow, type FindingsPage } from "@/lib/api";
 
+const SEVERITY_ORDER = ["HIGH", "MED", "LOW", "INFO"] as const;
+
 const SEVERITY_COLORS: Record<string, string> = {
   HIGH: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
   MED: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
   LOW: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   INFO: "bg-muted text-muted-foreground",
+};
+
+const SEVERITY_DOT: Record<string, string> = {
+  HIGH: "bg-red-500",
+  MED: "bg-amber-500",
+  LOW: "bg-blue-500",
+  INFO: "bg-muted-foreground/50",
+};
+
+const SEVERITY_CHART_COLOR: Record<string, string> = {
+  HIGH: "hsl(var(--destructive))",
+  MED: "hsl(var(--warning))",
+  LOW: "hsl(var(--info))",
+  INFO: "hsl(var(--muted-foreground) / 0.5)",
 };
 
 interface RisksTabProps {
@@ -68,11 +86,63 @@ export function RisksTab({ scanId, scanProfile }: RisksTabProps) {
     );
   }
 
-  const { total = 0, items = [] } = query.data ?? {};
+  const { total = 0, items = [], severity_counts = {} } = query.data ?? {};
   const totalPages = Math.max(1, Math.ceil(total / limit));
+  const totalFindings = Object.values(severity_counts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="space-y-4">
+      {totalFindings > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Findings by severity</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-6">
+              <div style={{ width: 132, height: 132 }} className="shrink-0 relative">
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={SEVERITY_ORDER.map((sev) => ({ sev, count: severity_counts[sev] ?? 0 }))}
+                      dataKey="count"
+                      nameKey="sev"
+                      innerRadius={44}
+                      outerRadius={62}
+                      paddingAngle={2}
+                    >
+                      {SEVERITY_ORDER.map((sev) => (
+                        <Cell key={sev} fill={SEVERITY_CHART_COLOR[sev]} />
+                      ))}
+                    </Pie>
+                    <RTooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-xl font-semibold tabular-nums">{totalFindings}</span>
+                  <span className="text-[10px] text-muted-foreground">findings</span>
+                </div>
+              </div>
+              <div className="flex-1 space-y-2.5">
+                {SEVERITY_ORDER.map((sev) => {
+                  const count = severity_counts[sev] ?? 0;
+                  const pct = totalFindings > 0 ? Math.round((count / totalFindings) * 100) : 0;
+                  return (
+                    <div key={sev} className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2">
+                        <i className={`h-2.5 w-2.5 rounded-sm inline-block ${SEVERITY_DOT[sev]}`} />
+                        {sev}
+                      </span>
+                      <span>
+                        <span className="font-semibold tabular-nums">{count}</span>
+                        <span className="text-muted-foreground text-xs ml-1.5">{pct}%</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Filter bar */}
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted-foreground">Severity:</span>
