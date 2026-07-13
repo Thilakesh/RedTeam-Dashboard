@@ -19,7 +19,11 @@ from app.models import (
     InvestigationTask,
     InvestigationTaskStatus,
 )
+from app.services import storage
 from app.services.queue import enqueue_investigation_task
+
+_DB_PREVIEW_CAP = 100_000
+_STDERR_PREVIEW_CAP = 20_000
 
 # Canonical tool list; order is also the display order in dropdowns.
 TOOLS: list[str] = ["nmap_deep", "ffuf", "dirsearch", "testssl"]
@@ -135,13 +139,31 @@ def mark_task_started(task: InvestigationTask) -> None:
     task.started_at = datetime.now(timezone.utc)
 
 
-def mark_task_completed(task: InvestigationTask, raw_output: str | None) -> None:
+def mark_task_completed(
+    task: InvestigationTask,
+    raw_output: str | None,
+    *,
+    exit_code: int | None = None,
+    stderr: str | None = None,
+) -> None:
     task.status = InvestigationTaskStatus.completed
     task.progress_pct = 100
     task.finished_at = datetime.now(timezone.utc)
+    task.exit_code = exit_code
     if raw_output is not None:
-        # Cap at 100KB (per plan §Risk + scaling notes)
-        task.raw_output = raw_output[:100_000]
+        # DB keeps a capped preview; the untruncated blob goes to MinIO so
+        # nothing is lost to the cap (see plan Phase 3 — lift the 100KB cap).
+        task.raw_output = raw_output[:_DB_PREVIEW_CAP]
+        if len(raw_output) > _DB_PREVIEW_CAP:
+            object_name = f"logs/investigation_tasks/{task.id}/stdout.txt"
+            if storage.upload_bytes(object_name, raw_output.encode("utf-8", errors="replace")):
+                task.stdout_object_key = object_name
+    if stderr:
+        task.stderr = stderr[:_STDERR_PREVIEW_CAP]
+        if len(stderr) > _STDERR_PREVIEW_CAP:
+            object_name = f"logs/investigation_tasks/{task.id}/stderr.txt"
+            if storage.upload_bytes(object_name, stderr.encode("utf-8", errors="replace")):
+                task.stderr_object_key = object_name
 
 
 def mark_task_failed(task: InvestigationTask, error: str) -> None:

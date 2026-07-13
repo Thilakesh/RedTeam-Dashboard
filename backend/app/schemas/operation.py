@@ -43,6 +43,7 @@ class OperationOut(BaseModel):
     progress_pct: int
     duration_s: float | None = None
     raw_output_present: bool
+    exit_code: int | None = None
     error: str | None = None
     created_at: datetime
     started_at: datetime | None = None
@@ -68,3 +69,6 @@ class OperationDetailOut(BaseModel):
     operation: OperationOut
     findings: list[OperationFindingOut]
     raw_output: str | None = None
+    stderr: str | None = None
+    stdout_url: str | None = None
+    stderr_url: str | None = None

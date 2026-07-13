@@ -9,10 +9,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Operation, OperationFinding, OperationStatus
+from app.services import storage
 from app.services.operations_command import (
     TOOLS,
     render_command,
@@ -22,6 +23,25 @@ from app.services.operations_command import (
 from app.services.queue import enqueue_operation
 
 _ACTIVE = (OperationStatus.queued.value, OperationStatus.running.value)
+
+# Caps total concurrent load per user regardless of request pacing — the
+# per-minute rate limit alone doesn't stop someone from patiently (or via a
+# slow Intruder run) accumulating hundreds of active operations over time and
+# exhausting the investigation-worker queue. This is the actual ceiling.
+MAX_ACTIVE_OPERATIONS_PER_USER = 10
+
+
+class DuplicateOperationError(Exception):
+    """Raised when an identical operation is already queued or running —
+    kept distinct from ValueError so the API layer can map it to 409 instead
+    of the 422 used for bad input."""
+
+
+class TooManyActiveOperationsError(Exception):
+    """Raised when the user already has MAX_ACTIVE_OPERATIONS_PER_USER
+    operations queued or running — mapped to 429 by the API layer."""
+_DB_PREVIEW_CAP = 100_000
+_STDERR_PREVIEW_CAP = 20_000
 
 
 def build_preview(
@@ -60,6 +80,39 @@ async def create_operation(
         raise ValueError(f"tool '{tool}' is not supported")
     host = validate_target(target_type, target)
     validate_custom_args(tool, profile, custom_args)
+
+    active_count = await db.scalar(
+        select(func.count())
+        .select_from(Operation)
+        .where(
+            Operation.org_id == org_id,
+            Operation.created_by == created_by,
+            Operation.status.in_(_ACTIVE),
+        )
+    )
+    if active_count >= MAX_ACTIVE_OPERATIONS_PER_USER:
+        raise TooManyActiveOperationsError(
+            f"you already have {MAX_ACTIVE_OPERATIONS_PER_USER} operations queued or "
+            "running — wait for one to finish before starting another"
+        )
+
+    # Blocks replay of the exact same create-operation request (and
+    # double-clicks) — same user, same target+tool, still in flight.
+    existing = await db.scalar(
+        select(Operation.id).where(
+            Operation.org_id == org_id,
+            Operation.created_by == created_by,
+            Operation.target == host,
+            Operation.target_type == target_type,
+            Operation.tool == tool,
+            Operation.status.in_(_ACTIVE),
+        )
+    )
+    if existing is not None:
+        raise DuplicateOperationError(
+            "an identical operation for this target and tool is already queued or running"
+        )
+
     generated_command = render_command(
         tool, host, profile=profile, protocol=protocol, custom_args=custom_args
     )
@@ -172,12 +225,31 @@ def mark_started(op: Operation) -> None:
     op.started_at = datetime.now(timezone.utc)
 
 
-def mark_completed(op: Operation, raw_output: str | None) -> None:
+def mark_completed(
+    op: Operation,
+    raw_output: str | None,
+    *,
+    exit_code: int | None = None,
+    stderr: str | None = None,
+) -> None:
     op.status = OperationStatus.completed.value
     op.progress_pct = 100
     op.completed_at = datetime.now(timezone.utc)
+    op.exit_code = exit_code
     if raw_output is not None:
-        op.raw_output = raw_output[:100_000]
+        # DB keeps a capped preview; the untruncated blob goes to MinIO so
+        # nothing is lost to the cap (see plan Phase 3 — lift the 100KB cap).
+        op.raw_output = raw_output[:_DB_PREVIEW_CAP]
+        if len(raw_output) > _DB_PREVIEW_CAP:
+            object_name = f"logs/operations/{op.id}/stdout.txt"
+            if storage.upload_bytes(object_name, raw_output.encode("utf-8", errors="replace")):
+                op.stdout_object_key = object_name
+    if stderr:
+        op.stderr = stderr[:_STDERR_PREVIEW_CAP]
+        if len(stderr) > _STDERR_PREVIEW_CAP:
+            object_name = f"logs/operations/{op.id}/stderr.txt"
+            if storage.upload_bytes(object_name, stderr.encode("utf-8", errors="replace")):
+                op.stderr_object_key = object_name
 
 
 def mark_failed(op: Operation, error: str) -> None:

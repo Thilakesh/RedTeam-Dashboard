@@ -73,10 +73,27 @@ class AuditOut(BaseModel):
     id: int
     actor_user_id: UUID | None
     actor_ip: str | None
+    user_agent: str | None = None
+    org_id: UUID | None = None
     action: str
     target_type: str | None
     target_id: UUID | None
     meta: dict
+    created_at: datetime
+
+
+class ToolExecutionOut(BaseModel):
+    id: UUID
+    source: Literal["operation", "investigation_task", "scan_stage"]
+    tool: str
+    target: str | None = None
+    status: str
+    exit_code: int | None = None
+    error: str | None = None
+    stderr_preview: str | None = None
+    stdout_url: str | None = None
+    stderr_url: str | None = None
+    org_id: UUID
     created_at: datetime
 
 

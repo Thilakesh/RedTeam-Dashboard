@@ -1,0 +1,15 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: webhook
+    receivers:
+      - uid: webhook_default
+        type: webhook
+        settings:
+          # Set GRAFANA_ALERT_WEBHOOK_URL on the grafana service (infra/.env
+          # on the VPS) to the real receiving endpoint (n8n, custom listener,
+          # etc). Grafana expands $__env{...} in provisioning files at load
+          # time — nothing else needs to change here.
+          url: $__env{GRAFANA_ALERT_WEBHOOK_URL}
+          httpMethod: POST

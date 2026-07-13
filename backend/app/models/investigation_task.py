@@ -42,6 +42,12 @@ class InvestigationTask(Base):
     progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     raw_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stderr: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Object keys for the untruncated stdout/stderr blobs in MinIO — set when
+    # either exceeds the DB preview cap (see services/investigation_tasks.py).
+    stdout_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stderr_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

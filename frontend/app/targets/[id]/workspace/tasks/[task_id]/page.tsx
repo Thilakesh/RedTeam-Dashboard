@@ -85,7 +85,7 @@ function TaskContent({
     );
   }
 
-  const { task, findings, raw_output } = taskQ.data;
+  const { task, findings, raw_output, stderr, stdout_url, stderr_url } = taskQ.data;
   const toolLabel = TOOL_LABELS[task.tool] ?? task.tool;
 
   return (
@@ -157,7 +157,13 @@ function TaskContent({
         )}
       </section>
 
-      <RawOutputCollapsible content={raw_output} />
+      <RawOutputCollapsible
+        content={raw_output}
+        exitCode={task.exit_code}
+        stderr={stderr}
+        stdoutUrl={stdout_url}
+        stderrUrl={stderr_url}
+      />
     </div>
   );
 }

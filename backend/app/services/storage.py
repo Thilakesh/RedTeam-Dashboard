@@ -10,6 +10,7 @@ Falls back gracefully when MINIO_URL is not set — upload_file returns False, U
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -113,6 +114,23 @@ def upload_file(object_name: str, file_path: Path, content_type: str = "image/pn
         return False
 
 
+def upload_bytes(
+    object_name: str, data: bytes, content_type: str = "text/plain; charset=utf-8"
+) -> bool:
+    """Upload in-memory bytes (full tool stdout/stderr) to MinIO. Returns True on
+    success, False if MinIO is not configured or the upload failed."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        client.put_object(
+            _bucket(), object_name, io.BytesIO(data), length=len(data), content_type=content_type
+        )
+        return True
+    except S3Error:
+        return False
+
+
 def public_url(object_name: str) -> str | None:
     """Return a direct (unsigned) URL reachable from the browser.
 
@@ -162,3 +180,8 @@ def screenshot_url(object_name: str) -> str | None:
     if os.environ.get("MINIO_USE_SIGNED_URLS", "").lower() in ("1", "true", "yes"):
         return presigned_url(object_name, expires_seconds=3600)
     return public_url(object_name)
+
+
+# Same signed-vs-public logic as screenshot_url, just named for non-screenshot
+# objects (full tool stdout/stderr blobs) so call sites read clearly.
+object_url = screenshot_url

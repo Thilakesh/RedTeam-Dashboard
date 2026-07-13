@@ -20,6 +20,8 @@ dependencies = [
     "sse-starlette>=2.0",
     "maxminddb>=2.6",
     "minio>=7.2",
+    "python-json-logger>=2.0",
+    "prometheus-fastapi-instrumentator>=7.0",
 ]
 
 [project.optional-dependencies]

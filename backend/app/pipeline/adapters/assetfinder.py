@@ -1,7 +1,7 @@
 import asyncio
 import shutil
 
-from app.pipeline.stage import AssetRecord, StageContext
+from app.pipeline.stage import AssetRecord, StageContext, StageExecutionError
 
 
 class AssetfinderStage:
@@ -32,9 +32,11 @@ class AssetfinderStage:
             raise RuntimeError("assetfinder timed out after 120s") from None
 
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"assetfinder exited {proc.returncode}: "
-                f"{stderr.decode(errors='replace')[:500]}"
+            stderr_text = stderr.decode(errors="replace")
+            raise StageExecutionError(
+                f"assetfinder exited {proc.returncode}: {stderr_text[:500]}",
+                exit_code=proc.returncode,
+                stderr=stderr_text,
             )
 
         seen: set[str] = set()

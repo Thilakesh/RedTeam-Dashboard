@@ -11,6 +11,7 @@ from app.core import features
 from app.core.db import get_db
 from app.core.redis import get_redis
 from app.core.tokens import decode_access_token
+from app.logging.context import bind_context
 from app.models import User, UserRole
 from app.models.auth import BlacklistedJti, RefreshSession
 
@@ -39,6 +40,7 @@ class CurrentUser:
         self.jti: UUID = jti
         self.session_id: UUID = session_id
         self._user = user
+        bind_context(org_id=str(self.org_id), user_id=str(self.id))
 
 
 async def _resolve_current_user(request: Request, db: AsyncSession) -> CurrentUser:

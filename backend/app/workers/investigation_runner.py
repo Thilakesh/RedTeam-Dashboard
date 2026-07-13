@@ -10,14 +10,18 @@ SET grows linearly with task count; revisit if workspaces exceed ~10K tasks).
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+from arq import cron
 from arq.connections import RedisSettings
 from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.logging.config import configure_logging
+from app.logging.context import bind_context, clear_context
 from app.models import (
     Asset,
     InvestigationFinding,
@@ -34,6 +38,7 @@ from app.pipeline.investigation.stage import (
     InvestigationResult,
     TaskContext,
 )
+from app.services import audit
 from app.services import investigation_tasks as task_service
 from app.services import operations as operation_service
 from app.services.endpoint_enrichment import upsert_endpoint_enrichment
@@ -89,6 +94,7 @@ async def _persist_result(
 
 async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
     task_id = UUID(task_id_str)
+    bind_context(task_id=task_id_str)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
 
     try:
@@ -101,6 +107,7 @@ async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
             workspace = await db.get(TargetWorkspace, task.workspace_id)
             if workspace is None:
                 raise RuntimeError(f"workspace {task.workspace_id} not found")
+            bind_context(workspace_id=str(workspace.id), org_id=str(workspace.org_id))
 
             asset = await db.get(Asset, task.asset_id)
             if asset is None:
@@ -148,7 +155,9 @@ async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
             fresh = await db.get(InvestigationTask, task_id)
             if fresh is None:
                 return
-            task_service.mark_task_completed(fresh, result.raw_output)
+            task_service.mark_task_completed(
+                fresh, result.raw_output, exit_code=result.exit_code, stderr=result.stderr
+            )
             await db.commit()
 
         await _publish(
@@ -172,6 +181,7 @@ async def run_investigation_task(_ctx: dict, task_id_str: str) -> None:
         raise
     finally:
         await redis.aclose()
+        clear_context()
 
 
 async def _publish_operation(redis: Redis, operation_id: UUID, event: str, **fields) -> None:
@@ -184,6 +194,7 @@ async def run_operation(_ctx: dict, operation_id_str: str) -> None:
     hand-typed target. Persists ONLY operation_findings + raw_output (no recon
     asset-graph enrichment)."""
     operation_id = UUID(operation_id_str)
+    bind_context(operation_id=operation_id_str)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
 
     try:
@@ -191,6 +202,7 @@ async def run_operation(_ctx: dict, operation_id_str: str) -> None:
             op = await db.get(Operation, operation_id)
             if op is None:
                 raise RuntimeError(f"operation {operation_id} not found")
+            bind_context(org_id=str(op.org_id))
 
             # Cancel start-guard: cancelled before the worker picked it up.
             if op.status == OperationStatus.cancelled.value:
@@ -241,7 +253,9 @@ async def run_operation(_ctx: dict, operation_id_str: str) -> None:
                         evidence=f.evidence or {},
                     )
                 )
-            operation_service.mark_completed(fresh, result.raw_output)
+            operation_service.mark_completed(
+                fresh, result.raw_output, exit_code=result.exit_code, stderr=result.stderr
+            )
             await db.commit()
 
         await _publish_operation(
@@ -263,10 +277,31 @@ async def run_operation(_ctx: dict, operation_id_str: str) -> None:
         raise
     finally:
         await redis.aclose()
+        clear_context()
+
+
+async def startup(_ctx: dict) -> None:
+    configure_logging("investigation-worker")
+
+
+async def purge_audit_logs_job(_ctx: dict) -> None:
+    """Nightly retention purge — audit_logs.actor_ip is PII and the table has
+    no other cap. Runs here (not on worker/heavy-worker) because those two
+    share WorkerSettings and would each fire the same cron independently;
+    investigation-worker is the only single-instance process."""
+    async with SessionLocal() as db:
+        deleted = await audit.purge_expired(db, settings.audit_retention_days)
+        logging.getLogger(__name__).info(
+            "audit_logs retention purge: deleted %d row(s) older than %d days",
+            deleted,
+            settings.audit_retention_days,
+        )
 
 
 class InvestigationWorkerSettings:
     functions = [run_investigation_task, run_operation]
+    on_startup = startup
+    cron_jobs = [cron(purge_audit_logs_job, hour=3, minute=0)]
     queue_name = "investigation"
     job_timeout = 60 * 15  # 15 min — longest tool here (nmap_deep) caps at 600s
     max_jobs = 6

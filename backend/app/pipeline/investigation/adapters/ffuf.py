@@ -135,6 +135,8 @@ class FfufAdapter:
                 return _tool_error_result(
                     f"ffuf exceeded {_TIMEOUT_SEC}s on {url}",
                     raw_output=raw_stderr[:_RAW_CAP_BYTES],
+                    exit_code=proc.returncode,
+                    stderr=raw_stderr,
                 )
 
             if not out_path.exists() or out_path.stat().st_size == 0:
@@ -142,6 +144,8 @@ class FfufAdapter:
                     "ffuf produced no output (target unreachable or no matches)",
                     raw_output=raw_stderr[:_RAW_CAP_BYTES],
                     severity="info",
+                    exit_code=proc.returncode,
+                    stderr=raw_stderr,
                 )
 
             try:
@@ -163,13 +167,20 @@ class FfufAdapter:
                 endpoints=endpoints,
                 findings=findings,
                 raw_output=raw_output,
+                exit_code=proc.returncode,
+                stderr=raw_stderr,
             )
         finally:
             out_path.unlink(missing_ok=True)
 
 
 def _tool_error_result(
-    msg: str, *, raw_output: str = "", severity: str = "info"
+    msg: str,
+    *,
+    raw_output: str = "",
+    severity: str = "info",
+    exit_code: int | None = None,
+    stderr: str = "",
 ) -> InvestigationResult:
     return InvestigationResult(
         findings=[
@@ -181,6 +192,8 @@ def _tool_error_result(
             )
         ],
         raw_output=raw_output or msg,
+        exit_code=exit_code,
+        stderr=stderr,
     )
 
 

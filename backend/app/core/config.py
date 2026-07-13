@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""          # required for deep scans; set via OPENROUTER_API_KEY env
     bbot_timeout: int = 1800
 
+    # audit_logs rows (and their actor_ip PII) older than this are purged by
+    # the nightly retention cron — see workers/runner.py::purge_audit_logs_job.
+    audit_retention_days: int = 180
+
     @model_validator(mode="after")
     def _resolve_super_admin(self) -> "Settings":
         if not self.super_admin_email:
