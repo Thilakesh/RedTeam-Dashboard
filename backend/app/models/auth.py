@@ -77,6 +77,11 @@ class AuditLog(Base):
         PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     actor_ip: Mapped[str | None] = mapped_column(INET, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Denormalized from the actor's org at write time (same pattern as
+    # Scan.org_id) so tenant-scoped reads don't need a join. NULL for
+    # unauthenticated/system events.
+    org_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True, index=True)
     action: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     target_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     target_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)

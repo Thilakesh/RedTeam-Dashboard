@@ -13,17 +13,25 @@
 
 recon.thilakesh.in {
 	import security_headers
+	log
 	reverse_proxy frontend:3000
 }
 
 recon-api.thilakesh.in {
 	import security_headers
+	log
 	reverse_proxy backend:8000
 }
 
 recon-media.thilakesh.in {
 	import security_headers
+	log
 	reverse_proxy minio:9000 {
 		header_up Host minio:9000
 	}
+}
+
+grafana.thilakesh.in {
+	import security_headers
+	reverse_proxy grafana:3000
 }

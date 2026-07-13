@@ -45,13 +45,16 @@ async def create_or_get_workspace(
     org_id: UUID,
     target_domain: str,
     created_by: UUID | None = None,
-) -> TargetWorkspace:
+) -> tuple[TargetWorkspace, bool]:
     """Idempotent: returns existing workspace if (target_id, parent_scan_id) row exists.
 
     Idempotency is keyed only on (target_id, parent_scan_id), not created_by —
     but the caller (create_workspace) already scopes the parent-scan lookup by
     the analyst's own scans, so two different analysts can never race to
     create/reuse the same workspace row in the first place.
+
+    Returns (workspace, created) — `created` tells the caller whether to emit
+    a workspace.created audit event or treat this as a no-op re-fetch.
     """
     existing = await db.scalar(
         select(TargetWorkspace).where(
@@ -60,7 +63,7 @@ async def create_or_get_workspace(
         )
     )
     if existing is not None:
-        return existing
+        return existing, False
 
     ws = TargetWorkspace(
         org_id=org_id,
@@ -83,9 +86,9 @@ async def create_or_get_workspace(
         )
         if existing is None:
             raise
-        return existing
+        return existing, False
     await db.refresh(ws)
-    return ws
+    return ws, True
 
 
 async def list_workspaces_for_org(

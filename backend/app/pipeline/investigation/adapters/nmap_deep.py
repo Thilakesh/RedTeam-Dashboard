@@ -134,6 +134,8 @@ class NmapDeepAdapter:
                         f"timeout after {_TIMEOUT_SEC}s\n"
                         f"{raw_stderr[:_RAW_CAP_BYTES]}"
                     ),
+                    exit_code=proc.returncode,
+                    stderr=raw_stderr,
                 )
 
             if not out_path.exists() or out_path.stat().st_size == 0:
@@ -151,6 +153,8 @@ class NmapDeepAdapter:
                         )
                     ],
                     raw_output=raw_stderr[:_RAW_CAP_BYTES],
+                    exit_code=proc.returncode,
+                    stderr=raw_stderr,
                 )
 
             try:
@@ -172,6 +176,8 @@ class NmapDeepAdapter:
                 services=services,
                 findings=findings,
                 raw_output=raw_output,
+                exit_code=proc.returncode,
+                stderr=raw_stderr,
             )
         finally:
             out_path.unlink(missing_ok=True)

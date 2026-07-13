@@ -1,0 +1,64 @@
+// Scrapes stdout of the app containers via the Docker API (no bind-mount of
+// /var/lib/docker/containers needed) and ships to Loki. Only the containers
+// that emit our structured JSON logs (Phase 1) or Caddy access logs are kept —
+// postgres/redis/minio/loki/grafana/alloy itself are dropped to keep ingest
+// volume (and thus disk/RAM) bounded on the single VPS.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Regex is a full-string match, and compose prefixes container names with
+  // the project name (e.g. "infra-backend-1"), so this must be substring-anchored.
+  rule {
+    source_labels = ["container"]
+    regex         = ".*(backend|worker|caddy).*"
+    action        = "keep"
+  }
+}
+
+loki.source.docker "app_containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = {service = "docker"}
+  forward_to = [loki.process.extract_fields.receiver]
+}
+
+// Backend/worker lines are single JSON objects (Phase 1 dictConfig JSON
+// formatter); Caddy's default stdout encoder is also JSON. Fields that don't
+// exist on a given line (e.g. org_id on a Caddy access log) just come back
+// empty and are dropped by the label stage below.
+loki.process "extract_fields" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.json {
+    expressions = {
+      org_id  = "org_id",
+      scan_id = "scan_id",
+      level   = "levelname",
+    }
+  }
+
+  stage.labels {
+    values = {
+      org_id  = "",
+      scan_id = "",
+      level   = "",
+    }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -81,6 +81,8 @@ class InvestigationResult:
     endpoints: list[EndpointRecord] = field(default_factory=list)
     tls_observations: list[TlsObservationRecord] = field(default_factory=list)
     raw_output: str = ""
+    exit_code: int | None = None
+    stderr: str = ""
 
 
 class InvestigationAdapter(Protocol):

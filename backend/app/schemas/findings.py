@@ -22,3 +22,4 @@ class FindingRow(BaseModel):
 class FindingsPage(BaseModel):
     total: int
     items: list[FindingRow]
+    severity_counts: dict[str, int]

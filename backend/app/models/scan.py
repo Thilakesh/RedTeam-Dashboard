@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,5 +70,10 @@ class ScanStage(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Populated on failure when the adapter raises StageExecutionError (see
+    # pipeline/stage.py) — most adapters swallow non-zero exits and return
+    # partial results instead, so this is only set for hard stage failures.
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stderr: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     scan: Mapped[Scan] = relationship(back_populates="stages")

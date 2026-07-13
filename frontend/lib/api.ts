@@ -1,7 +1,10 @@
+import { genRequestId, logger } from "./logger";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const CSRF_COOKIE = "rt_csrf";
+const REQUEST_ID_HEADER = "X-Request-ID";
 
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -16,7 +19,7 @@ export function getCsrfToken(): string | null {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public requestId?: string) {
     super(message);
   }
 }
@@ -36,7 +39,8 @@ async function parseError(res: Response): Promise<ApiError> {
         .join("; ");
     }
   } catch {}
-  return new ApiError(res.status, detail);
+  const requestId = res.headers.get(REQUEST_ID_HEADER) ?? undefined;
+  return new ApiError(res.status, detail, requestId);
 }
 
 async function doFetch(
@@ -46,6 +50,7 @@ async function doFetch(
   const { headers, _retry: _ignored, ...rest } = init;
   const h = new Headers(headers);
   if (!h.has("Content-Type") && init.body) h.set("Content-Type", "application/json");
+  if (!h.has(REQUEST_ID_HEADER)) h.set(REQUEST_ID_HEADER, genRequestId());
   const method = (init.method || "GET").toUpperCase();
   if (!SAFE_METHODS.has(method)) {
     const csrf = getCsrfToken();
@@ -94,7 +99,15 @@ export async function api<T>(
     }
   }
 
-  if (!res.ok) throw await parseError(res);
+  if (!res.ok) {
+    const err = await parseError(res);
+    logger.error("api request failed", {
+      path,
+      status: err.status,
+      request_id: err.requestId,
+    });
+    throw err;
+  }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
@@ -281,6 +294,7 @@ export type FindingRow = {
 export type FindingsPage = {
   total: number;
   items: FindingRow[];
+  severity_counts: Record<string, number>;
 };
 
 export async function startScan(scanId: string): Promise<Scan> {
@@ -403,6 +417,7 @@ export type InvestigationTaskOut = {
   progress_pct: number;
   duration_s: number | null;
   raw_output_present: boolean;
+  exit_code: number | null;
   error: string | null;
   created_at: string;
   started_at: string | null;
@@ -429,6 +444,9 @@ export type InvestigationTaskDetailOut = {
   task: InvestigationTaskOut;
   findings: InvestigationFindingOut[];
   raw_output: string | null;
+  stderr: string | null;
+  stdout_url: string | null;
+  stderr_url: string | null;
 };
 
 export const TOOL_LABELS: Record<string, string> = {
@@ -529,6 +547,7 @@ export type Operation = {
   progress_pct: number;
   duration_s: number | null;
   raw_output_present: boolean;
+  exit_code: number | null;
   error: string | null;
   created_at: string;
   started_at: string | null;
@@ -552,6 +571,9 @@ export type OperationDetail = {
   operation: Operation;
   findings: OperationFinding[];
   raw_output: string | null;
+  stderr: string | null;
+  stdout_url: string | null;
+  stderr_url: string | null;
 };
 
 export type OperationRequest = {
@@ -595,6 +617,42 @@ export async function retryOperation(operation_id: string): Promise<Operation> {
   return api<Operation>(`/operations/${operation_id}/retry`, { method: "POST" });
 }
 
+// --- Dashboard ----------------------------------------------------------------
+
+export type ScanActivityDay = { day: string; completed: number };
+
+export type RecentScanRow = {
+  id: string;
+  domain: string;
+  profile: string;
+  status: string;
+  progress_pct: number;
+  created_at: string;
+};
+
+export type TopFindingRow = {
+  scan_id: string;
+  fqdn: string;
+  severity: string;
+  risk_score: number;
+  rationale: string;
+};
+
+export type DashboardSummary = {
+  active_scans: number;
+  assets_tracked: number;
+  open_findings: number;
+  workspaces: number;
+  severity_counts: Record<string, number>;
+  scan_activity: ScanActivityDay[];
+  recent_scans: RecentScanRow[];
+  top_findings: TopFindingRow[];
+};
+
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  return api<DashboardSummary>("/dashboard/summary");
+}
+
 // --- Admin: OpenRouter settings ----------------------------------------------
 
 export type OpenRouterSettings = {
@@ -636,4 +694,36 @@ export async function testOpenRouterConnection(body: {
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+// --- Admin: tool execution logs (Phase 5 — Postgres-only, tenant-scoped) -----
+
+export type ToolExecutionOut = {
+  id: string;
+  source: "operation" | "investigation_task" | "scan_stage";
+  tool: string;
+  target: string | null;
+  status: string;
+  exit_code: number | null;
+  error: string | null;
+  stderr_preview: string | null;
+  stdout_url: string | null;
+  stderr_url: string | null;
+  org_id: string;
+  created_at: string;
+};
+
+export async function listToolExecutions(params: {
+  tool?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+}): Promise<ToolExecutionOut[]> {
+  const qs = new URLSearchParams();
+  if (params.tool) qs.set("tool", params.tool);
+  if (params.status) qs.set("status", params.status);
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
+  const query = qs.toString();
+  return api<ToolExecutionOut[]>(`/admin/logs/tool-executions${query ? `?${query}` : ""}`);
 }

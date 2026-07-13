@@ -462,12 +462,26 @@ async def build_findings(
     severity: str | None = None,
     offset: int = 0,
     limit: int = 50,
-) -> tuple[int, list[FindingRow]]:
-    """Return paginated findings ordered by priority_rank ASC (1 = highest risk)."""
+) -> tuple[int, list[FindingRow], dict[str, int]]:
+    """Return paginated findings ordered by priority_rank ASC (1 = highest risk).
+
+    severity_counts is always the full per-severity breakdown for the scan,
+    unaffected by the severity filter — it feeds a summary chart that needs
+    to show every bucket regardless of which one the table is filtered to.
+    """
     count_q = select(func.count()).select_from(Finding).where(Finding.scan_id == scan_id)
     if severity:
         count_q = count_q.where(Finding.severity == severity)
     total: int = await db.scalar(count_q) or 0
+
+    severity_rows = (
+        await db.execute(
+            select(Finding.severity, func.count(Finding.id))
+            .where(Finding.scan_id == scan_id)
+            .group_by(Finding.severity)
+        )
+    ).all()
+    severity_counts = {sev.value: count for sev, count in severity_rows}
 
     data_q = (
         select(Finding, Asset.canonical_key)
@@ -494,4 +508,4 @@ async def build_findings(
         )
         for finding, fqdn in rows
     ]
-    return total, items
+    return total, items, severity_counts

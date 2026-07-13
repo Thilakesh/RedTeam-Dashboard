@@ -30,6 +30,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -59,6 +60,14 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-alpha@gmail.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Testing123@}
       CORS_ORIGINS: '["http://localhost:3000"]'
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
+      # Needed so the API can build download URLs for MinIO-offloaded tool
+      # output (Operation/InvestigationTask stdout+stderr) — see storage.object_url().
+      MINIO_URL: http://minio:9000
+      MINIO_PUBLIC_URL: http://localhost:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: recon
     ports:
       - "8000:8000"
     depends_on:
@@ -91,6 +100,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: recon
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,6 +126,7 @@ services:
       MINIO_BUCKET: recon
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ARQ_QUEUE_NAME: heavy
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,10 +145,18 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/recon
       REDIS_URL: redis://redis:6379/0
+      MINIO_URL: http://minio:9000
+      MINIO_PUBLIC_URL: http://localhost:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: recon
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       - ../backend:/app
@@ -154,7 +173,81 @@ services:
       - ../frontend:/app
     command: sh -c "npm install && npm run dev"
 
+  # --- Observability stack (dev mirror of docker-compose.prod.yml) ----------
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: postgresql://recon:recon@postgres:5432/recon?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - node-exporter
+      - postgres-exporter
+      - redis-exporter
+
+  loki:
+    image: grafana/loki:3.3.0
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/config.yml
+
+  alloy:
+    image: grafana/alloy:v1.5.1
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # No real endpoint in dev — Grafana loads fine with this, the webhook
+      # contact point just has nowhere to actually deliver to. Override this
+      # var before testing alert delivery locally.
+      GRAFANA_ALERT_WEBHOOK_URL: "http://localhost/unconfigured-alert-webhook"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3300:3000"
+    depends_on:
+      - loki
+      - prometheus
+
 volumes:
   postgres_data:
   minio_data:
   jwt_secrets:
+  prometheus_data:
+  loki_data:
+  grafana_data:

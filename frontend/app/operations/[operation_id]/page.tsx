@@ -74,7 +74,7 @@ function ResultContent({ params }: { params: { operation_id: string } }) {
     return <div className="p-6 text-sm text-destructive">Failed to load operation.</div>;
   }
 
-  const { operation, raw_output } = q.data;
+  const { operation, raw_output, stderr, stdout_url, stderr_url } = q.data;
   const toolLabel = TOOL_LABELS[operation.tool] ?? operation.tool;
   const active = operation.status === "queued" || operation.status === "running";
 
@@ -150,7 +150,13 @@ function ResultContent({ params }: { params: { operation_id: string } }) {
         )}
       </section>
 
-      <RawOutputCollapsible content={raw_output} />
+      <RawOutputCollapsible
+        content={raw_output}
+        exitCode={operation.exit_code}
+        stderr={stderr}
+        stdoutUrl={stdout_url}
+        stderrUrl={stderr_url}
+      />
     </div>
   );
 }

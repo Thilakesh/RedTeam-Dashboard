@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
@@ -31,8 +31,14 @@ from app.schemas.subdomain_view import (
 from app.services import audit, scan_view
 from app.services.net_guard import assert_target_allowed
 from app.services.queue import enqueue_scan
+from app.services.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+
+# Caps total concurrent load per user regardless of request pacing — the
+# per-minute rate limit alone doesn't stop someone from patiently accumulating
+# hundreds of active scans over time and exhausting the worker queues.
+MAX_ACTIVE_SCANS_PER_USER = 5
 
 
 async def _default_project_id(db: AsyncSession, org_id: UUID) -> UUID:
@@ -86,9 +92,38 @@ async def _get_scan_and_domain(
 @router.post("", response_model=ScanOut, status_code=status.HTTP_201_CREATED)
 async def create_scan(
     req: ScanCreateRequest,
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
+    # Cheapest check first — blocks Burp-style brute force before any DB work.
+    allowed = await check_rate_limit(
+        f"ratelimit:create_scan:{user.id}", limit=5, window_seconds=60
+    )
+    if not allowed:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "too many scan creation requests — try again in a minute",
+        )
+
+    active_count = await db.scalar(
+        select(func.count())
+        .select_from(Scan)
+        .where(
+            Scan.org_id == user.org_id,
+            Scan.created_by == user.id,
+            Scan.status.in_(
+                [ScanStatus.queued, ScanStatus.created, ScanStatus.running]
+            ),
+        )
+    )
+    if active_count >= MAX_ACTIVE_SCANS_PER_USER:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"you already have {MAX_ACTIVE_SCANS_PER_USER} scans queued or running — "
+            "wait for one to finish before starting another",
+        )
+
     await features.require(db, user.id, "recon")
     if req.profile == "deep":
         await features.require(db, user.id, "deep_scan")
@@ -114,6 +149,26 @@ async def create_scan(
         db.add(target)
         await db.flush()
 
+    # Blocks replay of the exact same create-scan request (and double-clicks
+    # that race past the frontend's disabled state) — same user, same target,
+    # same profile, still in flight.
+    in_flight = await db.scalar(
+        select(Scan.id).where(
+            Scan.target_id == target.id,
+            Scan.org_id == user.org_id,
+            Scan.created_by == user.id,
+            Scan.profile == req.profile,
+            Scan.status.in_(
+                [ScanStatus.queued, ScanStatus.created, ScanStatus.running]
+            ),
+        )
+    )
+    if in_flight is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "an identical scan for this domain and profile is already queued or running",
+        )
+
     initial_status = ScanStatus.created if req.autostart else ScanStatus.queued
     scan = Scan(
         target_id=target.id,
@@ -128,6 +183,15 @@ async def create_scan(
 
     if req.autostart:
         await enqueue_scan(str(scan.id), profile=scan.profile)
+        await audit.log(
+            db,
+            actor_user_id=user.id,
+            action="scan.started",
+            target_type="scan",
+            target_id=scan.id,
+            meta={"domain": domain, "profile": scan.profile},
+            request=request,
+        )
 
     return _to_scan_out(scan, target.domain)
 
@@ -152,6 +216,7 @@ async def list_scans(
 @router.post("/{scan_id}/start", response_model=ScanOut)
 async def start_scan(
     scan_id: UUID,
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
@@ -161,12 +226,22 @@ async def start_scan(
     scan.status = ScanStatus.created
     await db.commit()
     await enqueue_scan(str(scan.id), profile=scan.profile)
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="scan.started",
+        target_type="scan",
+        target_id=scan.id,
+        meta={"domain": domain, "profile": scan.profile},
+        request=request,
+    )
     return _to_scan_out(scan, domain)
 
 
 @router.post("/{scan_id}/stop", response_model=ScanOut)
 async def stop_scan(
     scan_id: UUID,
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ScanOut:
@@ -176,6 +251,15 @@ async def stop_scan(
     scan.status = ScanStatus.stopped
     scan.finished_at = datetime.now(timezone.utc)
     await db.commit()
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="scan.stopped",
+        target_type="scan",
+        target_id=scan.id,
+        meta={"domain": domain},
+        request=request,
+    )
     # Publish terminal event so SSE clients close the stream
     settings = get_settings()
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
@@ -397,10 +481,10 @@ async def get_scan_findings(
     """Prioritized risk findings for a deep scan, ordered by priority_rank ASC."""
     await _ensure_scan_visible(db, scan_id, user)
     offset = (page - 1) * limit
-    total, items = await scan_view.build_findings(
+    total, items, severity_counts = await scan_view.build_findings(
         db, scan_id, severity=severity, offset=offset, limit=limit
     )
-    return FindingsPage(total=total, items=items)
+    return FindingsPage(total=total, items=items, severity_counts=severity_counts)
 
 
 @router.get("/{scan_id}/stream")

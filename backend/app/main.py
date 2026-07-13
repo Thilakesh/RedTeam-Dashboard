@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.api import (
     auth,
+    dashboard as dashboard_api,
     operations as operations_api,
     scans,
     sessions as sessions_api,
@@ -16,15 +17,23 @@ from app.api import (
     users as users_api,
 )
 from app.api.admin import audit as admin_audit
+from app.api.admin import logs as admin_logs
 from app.api.admin import settings as admin_settings
 from app.api.middleware.csrf import CSRFMiddleware
+from app.api.middleware.request_id import RequestIDMiddleware
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.keys import ensure_keypair
 from app.core.security import hash_password
+from app.logging.config import configure_logging
 from app.models import Organization, Project, User, UserRole
+from app.observability import refresh_arq_metrics
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_fastapi_instrumentator import Instrumentator
+from starlette.responses import Response
 
 settings = get_settings()
+configure_logging("api")
 log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="Red Team Recon Dashboard", version="0.1.0")
@@ -42,14 +51,28 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*", "X-CSRF-Token"],
-    expose_headers=["*"],
+    # "*" is a no-op here: per the Fetch spec, the wildcard for
+    # Access-Control-Expose-Headers only applies to credential-less requests,
+    # and every request from this frontend uses credentials: "include". List
+    # X-Request-ID explicitly or the browser silently strips it from JS reach.
+    expose_headers=["*", "X-Request-ID"],
 )
+# Outermost — must run before CSRF/CORS so every request (including rejected
+# ones) gets a correlation id bound to logs and echoed back.
+app.add_middleware(RequestIDMiddleware)
+
+# .instrument() only — no .expose(), since /metrics below also refreshes the
+# arq gauges from Redis before rendering (both register into the same default
+# prometheus_client registry, so this still shows up in that response).
+Instrumentator().instrument(app)
 
 app.include_router(auth.router)
+app.include_router(dashboard_api.router)
 app.include_router(users_api.router)
 app.include_router(sessions_api.router)
 app.include_router(settings_api.router)
 app.include_router(admin_audit.router)
+app.include_router(admin_logs.router)
 app.include_router(admin_settings.router)
 app.include_router(scans.router)
 app.include_router(targets.router)
@@ -60,6 +83,12 @@ app.include_router(operations_api.router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    await refresh_arq_metrics()
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 async def _ensure_default_org() -> Organization:

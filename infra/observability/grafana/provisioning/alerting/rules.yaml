@@ -1,0 +1,166 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: infra-alerts
+    folder: Alerts
+    interval: 1m
+    rules:
+      - uid: worker-offline
+        title: Worker offline
+        condition: C
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "arq worker for queue {{ $labels.queue }} has not sent a health-check in >5m"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus-ds
+            model: { expr: "arq_worker_up", instant: true, refId: A }
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: C
+
+      - uid: queue-backlog
+        title: Queue backlog
+        condition: C
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "arq queue {{ $labels.queue }} has >50 pending jobs for 10m"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus-ds
+            model: { expr: "arq_queue_pending", instant: true, refId: A }
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [50] }
+              refId: C
+
+      - uid: high-error-rate
+        title: High HTTP error rate
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "backend 5xx rate is above 5% of total requests"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus-ds
+            model:
+              # "or vector(0)" keeps the numerator from being an empty vector
+              # when there have been zero 5xx responses (the common case) —
+              # without it, A/B is permanently NoData instead of a clean 0.
+              expr: '(sum(rate(http_requests_total{status=~"5.."}[5m])) or vector(0)) / sum(rate(http_requests_total[5m]))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+              refId: C
+
+      - uid: disk-above-90pct
+        title: Disk usage above 90%
+        condition: C
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "root filesystem on {{ $labels.instance }} is above 90% used"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus-ds
+            model:
+              expr: '1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.9] }
+              refId: C
+
+      - uid: db-unavailable
+        title: Database unavailable
+        condition: C
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "postgres_exporter cannot reach Postgres"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus-ds
+            model: { expr: "pg_up", instant: true, refId: A }
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: C
+
+      - uid: failed-operation-spike
+        title: Failed-operation spike
+        condition: C
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "queue {{ $labels.queue }} logged >3 failed jobs in its last health-check window"
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus-ds
+            model: { expr: "arq_jobs_failed", instant: true, refId: A }
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [3] }
+              refId: C

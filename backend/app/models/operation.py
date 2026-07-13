@@ -39,6 +39,12 @@ class Operation(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="queued")
     progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     raw_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stderr: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Object keys for the untruncated stdout/stderr blobs in MinIO — set when
+    # either exceeds the DB preview cap (see services/operations.py).
+    stdout_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    stderr_object_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     created_by: Mapped[UUID | None] = mapped_column(
         PgUUID(as_uuid=True),

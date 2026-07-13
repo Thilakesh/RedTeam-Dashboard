@@ -207,15 +207,25 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
 
       {/* Tabs */}
       <Tabs value={defaultTab} onValueChange={(t) => router.replace(`?tab=${t}`, { scroll: false })}>
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="subdomains">Subdomains</TabsTrigger>
-          <TabsTrigger value="ips">IP Summary</TabsTrigger>
-          <TabsTrigger value="cdnwaf">CDN / WAF</TabsTrigger>
-          <TabsTrigger value="tech">Technologies</TabsTrigger>
-          <TabsTrigger value="ports">Ports</TabsTrigger>
-          <TabsTrigger value="risks">Risks</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
+        <TabsList className="w-fit gap-1 rounded-xl border-0 bg-muted p-1">
+          {[
+            ["overview", "Overview"],
+            ["subdomains", "Subdomains"],
+            ["ips", "IP Summary"],
+            ["cdnwaf", "CDN / WAF"],
+            ["tech", "Technologies"],
+            ["ports", "Ports"],
+            ["risks", "Risks"],
+            ["history", "History"],
+          ].map(([value, label]) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="rounded-lg px-3.5 py-2 data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:after:content-none"
+            >
+              {label}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="overview">

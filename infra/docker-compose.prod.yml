@@ -28,6 +28,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Unauthenticated /minio/v2/metrics/cluster — fine since minio publishes
+      # no host port and is only reachable from other containers on this network.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -52,6 +55,7 @@ services:
       JWT_REFRESH_EXPIRE_DAYS: "14"
       COOKIE_SECURE: "true"
       COOKIE_DOMAIN: thilakesh.in
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       SUPER_ADMIN_EMAIL: ${ADMIN_EMAIL}
@@ -91,6 +95,7 @@ services:
       MINIO_BUCKET: recon
       MINIO_USE_SIGNED_URLS: "true"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,6 +121,7 @@ services:
       MINIO_USE_SIGNED_URLS: "true"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       ARQ_QUEUE_NAME: heavy
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,10 +138,19 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://recon:${POSTGRES_PASSWORD}@postgres:5432/recon
       REDIS_URL: redis://redis:6379/0
+      MINIO_URL: http://minio:9000
+      MINIO_PUBLIC_URL: https://recon-media.thilakesh.in
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: recon
+      MINIO_USE_SIGNED_URLS: "true"
+      PLATFORM_BLOCKED_DOMAINS: thilakesh.in
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     restart: unless-stopped
 
@@ -145,6 +160,88 @@ services:
       dockerfile: infra/Dockerfile.frontend
       args:
         NEXT_PUBLIC_API_URL: https://recon-api.thilakesh.in
+        NEXT_PUBLIC_GRAFANA_URL: https://grafana.thilakesh.in
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: postgresql://recon:${POSTGRES_PASSWORD}@postgres:5432/recon?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    depends_on:
+      - backend
+      - node-exporter
+      - postgres-exporter
+      - redis-exporter
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.3.0
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/config.yml
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.5.1
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: https://grafana.thilakesh.in
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Real endpoint for the Phase 7 alert contact point — set on the VPS.
+      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-http://localhost/unconfigured-alert-webhook}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+      - prometheus
     restart: unless-stopped
 
   caddy:
@@ -159,6 +256,7 @@ services:
     depends_on:
       - frontend
       - backend
+      - grafana
     restart: unless-stopped
 
 volumes:
@@ -167,3 +265,6 @@ volumes:
   jwt_secrets:
   caddy_data:
   caddy_config:
+  loki_data:
+  grafana_data:
+  prometheus_data:

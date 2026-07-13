@@ -46,6 +46,7 @@ from app.schemas.target_workspace import (
     WorkspaceSubdomainsResponse,
 )
 from app.services import audit
+from app.services import storage
 from app.services import target_workspace as ws_service
 from app.services import investigation_tasks as task_service
 from app.services.net_guard import assert_target_allowed
@@ -103,6 +104,7 @@ def _workspace_out(ws: TargetWorkspace, domain: str) -> WorkspaceOut:
 @router.post("", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
 async def create_workspace(
     req: WorkspaceCreateRequest,
+    request: Request,
     user: CurrentUser = Depends(require_feature("target_workspace")),
     db: AsyncSession = Depends(get_db),
 ) -> WorkspaceOut:
@@ -125,7 +127,7 @@ async def create_workspace(
             status.HTTP_409_CONFLICT, "parent recon scan not complete"
         )
 
-    ws = await ws_service.create_or_get_workspace(
+    ws, created = await ws_service.create_or_get_workspace(
         db,
         target_id=parent_scan.target_id,
         parent_scan_id=parent_scan.id,
@@ -133,6 +135,16 @@ async def create_workspace(
         target_domain=target_domain,
         created_by=user.id,
     )
+    if created:
+        await audit.log(
+            db,
+            actor_user_id=user.id,
+            action="workspace.created",
+            target_type="workspace",
+            target_id=ws.id,
+            meta={"domain": target_domain, "parent_scan_id": str(parent_scan.id)},
+            request=request,
+        )
     return _workspace_out(ws, target_domain)
 
 
@@ -242,6 +254,7 @@ async def list_workspace_tasks(
 async def create_investigation_task(
     workspace_id: UUID,
     req: InvestigationTaskCreateRequest,
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> InvestigationTaskOut:
@@ -292,6 +305,15 @@ async def create_investigation_task(
         tool=req.tool,
         params=safe_params,
     )
+    await audit.log(
+        db,
+        actor_user_id=user.id,
+        action="investigation_task.created",
+        target_type="investigation_task",
+        target_id=task.id,
+        meta={"workspace_id": str(ws.id), "tool": req.tool, "asset": asset.canonical_key},
+        request=request,
+    )
     return InvestigationTaskOut(
         id=task.id,
         workspace_id=task.workspace_id,
@@ -302,6 +324,7 @@ async def create_investigation_task(
         progress_pct=task.progress_pct,
         duration_s=None,
         raw_output_present=task.raw_output is not None,
+        exit_code=task.exit_code,
         error=task.error,
         created_at=task.created_at,
         started_at=task.started_at,
@@ -352,6 +375,7 @@ async def get_investigation_task(
             progress_pct=task.progress_pct,
             duration_s=duration_s,
             raw_output_present=task.raw_output is not None,
+            exit_code=task.exit_code,
             error=task.error,
             created_at=task.created_at,
             started_at=task.started_at,
@@ -372,6 +396,9 @@ async def get_investigation_task(
             for f in findings
         ],
         raw_output=task.raw_output,
+        stderr=task.stderr,
+        stdout_url=storage.object_url(task.stdout_object_key) if task.stdout_object_key else None,
+        stderr_url=storage.object_url(task.stderr_object_key) if task.stderr_object_key else None,
     )
 
 

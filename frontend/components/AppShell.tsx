@@ -91,6 +91,7 @@ const NAV_ADMIN: NavItem[] = [
       { href: "/admin/features", label: "Feature Controls" },
       { href: "/admin/settings", label: "System Settings" },
       { href: "/admin/audit", label: "Change Logs" },
+      { href: "/admin/logs", label: "Tool Executions" },
     ],
   },
 ];

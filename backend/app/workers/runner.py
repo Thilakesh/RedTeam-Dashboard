@@ -19,6 +19,8 @@ from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.logging.config import configure_logging
+from app.logging.context import bind_context, clear_context
 from app.models import Scan, ScanStage, ScanStatus, StageStatus, Target
 from app.pipeline.coordinator import execute_dag, total_weight
 from app.pipeline.profiles import stages_for
@@ -36,6 +38,7 @@ async def _publish(redis: Redis, scan_id: UUID, event: str, **fields) -> None:
 
 async def run_scan(_ctx: dict, scan_id_str: str) -> None:
     scan_id = UUID(scan_id_str)
+    bind_context(scan_id=scan_id_str)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     completed_weight = 0
 
@@ -47,6 +50,7 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
             target = await db.get(Target, scan.target_id)
             if target is None:
                 raise RuntimeError(f"target {scan.target_id} not found")
+            bind_context(org_id=str(scan.org_id))
             profile = scan.profile
             domain = target.domain
             target_id = target.id
@@ -107,6 +111,10 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
                 row.status = StageStatus.failed
                 row.finished_at = datetime.now(timezone.utc)
                 row.error = str(exc)[:1900]
+                row.exit_code = getattr(exc, "exit_code", None)
+                stderr = getattr(exc, "stderr", None)
+                if stderr:
+                    row.stderr = stderr[:4000]
                 await db.commit()
             await _publish(
                 redis, scan_id, "stage.failed", stage=stage.name, error=str(exc)[:500]
@@ -164,10 +172,12 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
         raise
     finally:
         await redis.aclose()
+        clear_context()
 
 
 async def startup(_ctx: dict) -> None:
     """Ensure MinIO bucket exists before processing any jobs."""
+    configure_logging(os.getenv("ARQ_QUEUE_NAME", "default") + "-worker")
     storage.ensure_bucket()
 
 

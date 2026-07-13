@@ -408,7 +408,11 @@ def _extract_tls_observation(
     )
 
 
-async def _run_testssl(host_port: str, out_path: Path, profile_args: list[str]) -> None:
+async def _run_testssl(
+    host_port: str, out_path: Path, profile_args: list[str]
+) -> tuple[int | None, str]:
+    """Returns (exit_code, stderr_text). Raises asyncio.TimeoutError on timeout —
+    exit_code is then whatever the killed process reports (often None/-9)."""
     cmd = [
         _BINARY,
         "--quiet",
@@ -424,11 +428,12 @@ async def _run_testssl(host_port: str, out_path: Path, profile_args: list[str]) 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
         preexec_fn=get_preexec_fn() if sys.platform != "win32" else None,
     )
     try:
-        await asyncio.wait_for(proc.wait(), timeout=_TIMEOUT_SEC)
+        _, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT_SEC)
+        return proc.returncode, (stderr_b or b"").decode("utf-8", errors="replace")
     except asyncio.TimeoutError:
         proc.kill()
         try:
@@ -492,7 +497,7 @@ class TestSslAdapter:
 
         try:
             try:
-                await _run_testssl(host_port, out_path, profile_args)
+                exit_code, tool_stderr = await _run_testssl(host_port, out_path, profile_args)
             except asyncio.TimeoutError:
                 return InvestigationResult(
                     findings=[
@@ -517,6 +522,8 @@ class TestSslAdapter:
                         )
                     ],
                     raw_output="",
+                    exit_code=exit_code,
+                    stderr=tool_stderr,
                 )
 
             raw_text = out_path.read_text(errors="replace")
@@ -533,6 +540,8 @@ class TestSslAdapter:
                         )
                     ],
                     raw_output=raw_text,
+                    exit_code=exit_code,
+                    stderr=tool_stderr,
                 )
 
             raw_findings = _flatten_testssl_data(data)
@@ -592,6 +601,8 @@ class TestSslAdapter:
                 findings=findings,
                 tls_observations=[tls_obs],
                 raw_output=raw_text,
+                exit_code=exit_code,
+                stderr=tool_stderr,
             )
         finally:
             try:

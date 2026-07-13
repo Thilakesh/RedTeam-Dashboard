@@ -5,6 +5,18 @@ from typing import Protocol
 from uuid import UUID
 
 
+class StageExecutionError(RuntimeError):
+    """Raise instead of a plain RuntimeError when a subprocess adapter fails so
+    the exit code and stderr survive to the ScanStage row (see
+    workers/runner.py::on_fail). Most adapters treat a non-zero exit as normal
+    (partial results are fine for enrichment) — this is for hard failures."""
+
+    def __init__(self, message: str, *, exit_code: int | None = None, stderr: str | None = None):
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.stderr = stderr
+
+
 @dataclass
 class AssetRecord:
     """A single asset emitted by a stage. Stage code never touches the DB directly —
