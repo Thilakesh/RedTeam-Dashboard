@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Ban, Eye, Plus, RotateCcw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   TOOL_LABELS,
@@ -15,15 +14,12 @@ import {
   type OperationStatus,
 } from "@/lib/api";
 
-const STATUS_VARIANT: Record<
-  OperationStatus,
-  "default" | "warning" | "success" | "destructive" | "outline"
-> = {
-  queued: "outline",
-  running: "warning",
-  completed: "success",
-  failed: "destructive",
-  cancelled: "default",
+const STATUS_PILL: Record<OperationStatus, string> = {
+  queued: "pill pill-out",
+  running: "pill pill-run",
+  completed: "pill pill-ok",
+  failed: "pill pill-err",
+  cancelled: "pill pill-info",
 };
 
 function fmtDuration(s: number | null): string {
@@ -59,11 +55,12 @@ function OperationsTable() {
   const rows = q.data?.rows ?? [];
 
   return (
-    <div className="container mx-auto max-w-6xl space-y-4">
+    <div className="max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Operation History</h1>
-          <p className="text-sm text-muted-foreground">
+          <div className="kicker mb-2">Operations</div>
+          <h1 className="page-h1">Operation History</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             Centralized history of standalone manual operations.
           </p>
         </div>
@@ -75,18 +72,18 @@ function OperationsTable() {
         </Link>
       </div>
 
-      <div className="rounded-md border border-border overflow-hidden">
+      <div className="rounded-lg overflow-hidden shadow-[0_0_0_1px_hsl(var(--border))]">
         <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+          <thead className="bg-foreground/[0.03]">
             <tr>
-              <th className="text-left px-3 py-2 font-medium">Operation ID</th>
-              <th className="text-left px-3 py-2 font-medium">Target</th>
-              <th className="text-left px-3 py-2 font-medium">Tool</th>
-              <th className="text-left px-3 py-2 font-medium">Profile</th>
-              <th className="text-left px-3 py-2 font-medium">Status</th>
-              <th className="text-left px-3 py-2 font-medium">Duration</th>
-              <th className="text-left px-3 py-2 font-medium">Started</th>
-              <th className="text-right px-3 py-2 font-medium">Actions</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Operation ID</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Target</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Tool</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Profile</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Status</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Duration</th>
+              <th className="text-left px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Started</th>
+              <th className="text-right px-3 py-2.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -111,13 +108,13 @@ function OperationsTable() {
             {rows.map((o: Operation) => {
               const active = o.status === "queued" || o.status === "running";
               return (
-                <tr key={o.id} className="border-t border-border hover:bg-muted/20">
+                <tr key={o.id} className="row-strip hover:bg-accent/40">
                   <td className="px-3 py-2 font-mono text-xs">{o.id.slice(0, 8)}…</td>
                   <td className="px-3 py-2 font-mono">{o.target}</td>
                   <td className="px-3 py-2">{TOOL_LABELS[o.tool] ?? o.tool}</td>
                   <td className="px-3 py-2">{o.profile ?? "—"}</td>
                   <td className="px-3 py-2">
-                    <Badge variant={STATUS_VARIANT[o.status]}>{o.status}</Badge>
+                    <span className={STATUS_PILL[o.status]}>{o.status}</span>
                   </td>
                   <td className="px-3 py-2">{fmtDuration(o.duration_s)}</td>
                   <td className="px-3 py-2 text-xs">

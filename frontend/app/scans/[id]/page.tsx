@@ -3,10 +3,10 @@
 import { Suspense, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, Clock, Crosshair, Download, Globe, Share2, Trash2 } from "lucide-react";
+import { Calendar, Check, Clock, Crosshair, Download, Globe, Share2, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OverviewTab } from "@/components/tabs/OverviewTab";
 import { IpSummaryTab } from "@/components/tabs/IpSummaryTab";
@@ -33,11 +33,13 @@ const SSE_EVENTS = [
   "scan.failed",
 ];
 
-const STATUS_VARIANT: Record<string, "success" | "warning" | "destructive" | "default"> = {
-  completed: "success",
-  running: "warning",
-  failed: "destructive",
-  created: "default",
+const STATUS_PILL: Record<string, string> = {
+  completed: "pill pill-ok",
+  running: "pill pill-run",
+  failed: "pill pill-err",
+  created: "pill pill-run",
+  queued: "pill pill-out",
+  stopped: "pill pill-info",
 };
 
 // Inner component — uses useSearchParams, must be wrapped in Suspense by the page
@@ -111,11 +113,13 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="text-xs text-muted-foreground mb-1">Scan Results</div>
+          <div className="kicker mb-1">Scan · {s.id.slice(0, 8)}</div>
           <div className="flex items-center gap-3">
-            <Globe className="h-5 w-5 text-primary" />
-            <h1 className="text-2xl font-semibold tracking-tight">{s.domain}</h1>
-            <Badge variant={STATUS_VARIANT[s.status] ?? "default"}>{s.status}</Badge>
+            <Globe className="h-6 w-6 text-primary" />
+            <h1 className="text-[32px] font-medium tracking-[-0.02em]">{s.domain}</h1>
+            <span className={STATUS_PILL[s.status] ?? "pill pill-info"}>
+              {s.status.toUpperCase()}
+            </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
             {started && (
@@ -186,19 +190,47 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      {/* Progress bar (only while running or created) */}
+      {/* Progress bar + pipeline (only while running or created) */}
       {(s.status === "running" || s.status === "created") && (
         <div className="mb-6">
           <div className="flex justify-between text-xs mb-1.5 text-muted-foreground">
-            <span>Progress</span>
+            <span>
+              {(() => {
+                const running = s.stages.find((st) => st.status === "running");
+                const doneCount = s.stages.filter((st) => st.status === "completed").length;
+                return running
+                  ? `Stage ${doneCount + 1} of ${s.stages.length} · ${running.stage_name}`
+                  : "Progress";
+              })()}
+            </span>
             <span>{s.progress_pct}%</span>
           </div>
-          <div className="h-2 bg-muted rounded overflow-hidden">
-            <div
-              className="h-full bg-primary transition-all"
-              style={{ width: `${s.progress_pct}%` }}
-            />
+          <div className="progress mb-3">
+            <i style={{ width: `${s.progress_pct}%` }} />
           </div>
+          {s.stages.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {s.stages.map((st) => (
+                <span
+                  key={st.id}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] border",
+                    st.status === "completed" && "border-success/30 bg-success/[0.12] text-success",
+                    st.status === "running" && "border-primary bg-primary/10 text-primary",
+                    st.status === "failed" && "border-sev-high/30 bg-sev-high/[0.12] text-sev-high-fg",
+                    (st.status === "pending" || st.status === "skipped") &&
+                      "border-border text-muted-foreground-2",
+                  )}
+                >
+                  {st.status === "completed" && <Check className="h-3 w-3" />}
+                  {st.status === "running" && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                  )}
+                  {st.stage_name}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {s.error && (
@@ -207,7 +239,7 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
 
       {/* Tabs */}
       <Tabs value={defaultTab} onValueChange={(t) => router.replace(`?tab=${t}`, { scroll: false })}>
-        <TabsList className="w-fit gap-1 rounded-xl border-0 bg-muted p-1">
+        <TabsList className="w-fit">
           {[
             ["overview", "Overview"],
             ["subdomains", "Subdomains"],
@@ -218,11 +250,7 @@ function ScanDetailContent({ params }: { params: { id: string } }) {
             ["risks", "Risks"],
             ["history", "History"],
           ].map(([value, label]) => (
-            <TabsTrigger
-              key={value}
-              value={value}
-              className="rounded-lg px-3.5 py-2 data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm data-[state=active]:after:content-none"
-            >
+            <TabsTrigger key={value} value={value}>
               {label}
             </TabsTrigger>
           ))}

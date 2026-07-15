@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Activity, AlertCircle, CheckCircle2, Crosshair, Database, ExternalLink, Play, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -16,26 +15,20 @@ import {
 } from "@/components/ui/select";
 import { api, canDeleteScan, createWorkspace, deleteScan, patchScan, startScan, stopScan, type Scan } from "@/lib/api";
 
-const STATUS_CONFIG: Record<
-  Scan["status"],
-  { label: string; variant: "default" | "warning" | "success" | "destructive" | "outline" }
-> = {
-  queued:    { label: "Not Started", variant: "outline"      },
-  created:   { label: "Queued",      variant: "warning"      },
-  running:   { label: "Running",     variant: "warning"      },
-  completed: { label: "Completed",   variant: "success"      },
-  failed:    { label: "Failed",      variant: "destructive"  },
-  stopped:   { label: "Stopped",     variant: "default"      },
+const STATUS_CONFIG: Record<Scan["status"], { label: string; pill: string }> = {
+  queued:    { label: "Not Started", pill: "pill pill-out"  },
+  created:   { label: "Queued",      pill: "pill pill-run"  },
+  running:   { label: "Running",     pill: "pill pill-run"  },
+  completed: { label: "Completed",   pill: "pill pill-ok"   },
+  failed:    { label: "Failed",      pill: "pill pill-err"  },
+  stopped:   { label: "Stopped",     pill: "pill pill-info" },
 };
 
 function RunningProgress({ scan }: { scan: Scan }) {
   return (
     <div className="min-w-[120px]">
-      <div className="h-1.5 bg-muted rounded overflow-hidden mb-1">
-        <div
-          className="h-full bg-primary transition-all"
-          style={{ width: `${scan.progress_pct}%` }}
-        />
+      <div className="progress mb-1">
+        <i style={{ width: `${scan.progress_pct}%` }} />
       </div>
       <div className="text-xs text-muted-foreground">{scan.progress_pct}%</div>
     </div>
@@ -68,11 +61,11 @@ function ScanTableRow({ scan }: { scan: Scan }) {
   });
   const [wsLaunching, setWsLaunching] = useState(false);
 
-  const cfg = STATUS_CONFIG[scan.status] ?? { label: scan.status, variant: "default" as const };
+  const cfg = STATUS_CONFIG[scan.status] ?? { label: scan.status, pill: "pill pill-info" };
   const isActive = scan.status === "running" || scan.status === "created";
 
   return (
-    <tr className="border-b border-border hover:bg-muted/30 transition-colors">
+    <tr className="row-strip hover:bg-accent/40 transition-colors">
       {/* Domain */}
       <td className="px-4 py-3">
         <Link
@@ -81,7 +74,7 @@ function ScanTableRow({ scan }: { scan: Scan }) {
         >
           {scan.domain}
         </Link>
-        <div className="text-xs text-muted-foreground mt-0.5">
+        <div className="text-xs text-muted-foreground-2 mt-0.5">
           {new Date(scan.created_at).toLocaleString()}
         </div>
       </td>
@@ -106,7 +99,7 @@ function ScanTableRow({ scan }: { scan: Scan }) {
 
       {/* Status */}
       <td className="px-4 py-3">
-        <Badge variant={cfg.variant}>{cfg.label}</Badge>
+        <span className={cfg.pill}>{cfg.label}</span>
       </td>
 
       {/* Progress */}
@@ -227,7 +220,8 @@ export default function ReconJobsPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Recon Jobs</h1>
+          <div className="kicker mb-2">Basic Recon</div>
+          <h1 className="page-h1">Recon Jobs</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Manage and monitor your reconnaissance scans.
           </p>
@@ -253,49 +247,50 @@ export default function ReconJobsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Recon Jobs</h1>
+        <div className="kicker mb-2">Basic Recon</div>
+        <h1 className="page-h1">Recon Jobs</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Manage and monitor your reconnaissance scans.
         </p>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5">
-          <Database className="h-4 w-4 text-muted-foreground" />
+        <div className="stat-tile flex-row items-center gap-3">
+          <Database className="h-4 w-4 text-muted-foreground shrink-0" />
           <div>
-            <div className="text-xs text-muted-foreground">Total Scans</div>
-            <div className="text-lg font-semibold tabular-nums leading-none">{totalCount}</div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2">Total Scans</div>
+            <div className="text-lg font-medium tabular-nums leading-none">{totalCount}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5">
-          <Activity className="h-4 w-4 text-warning" />
+        <div className="stat-tile flex-row items-center gap-3">
+          <Activity className="h-4 w-4 text-primary-tint shrink-0" />
           <div>
-            <div className="text-xs text-muted-foreground">Running</div>
-            <div className="text-lg font-semibold tabular-nums leading-none">{runningCount}</div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2">Running</div>
+            <div className="text-lg font-medium tabular-nums leading-none">{runningCount}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5">
-          <CheckCircle2 className="h-4 w-4 text-success" />
+        <div className="stat-tile flex-row items-center gap-3">
+          <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
           <div>
-            <div className="text-xs text-muted-foreground">Completed</div>
-            <div className="text-lg font-semibold tabular-nums leading-none">{completedCount}</div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2">Completed</div>
+            <div className="text-lg font-medium tabular-nums leading-none">{completedCount}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5">
-          <AlertCircle className="h-4 w-4 text-destructive" />
+        <div className="stat-tile flex-row items-center gap-3">
+          <AlertCircle className="h-4 w-4 text-sev-high-fg shrink-0" />
           <div>
-            <div className="text-xs text-muted-foreground">Failed / Stopped</div>
-            <div className="text-lg font-semibold tabular-nums leading-none">{failedCount}</div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2">Failed / Stopped</div>
+            <div className="text-lg font-medium tabular-nums leading-none">{failedCount}</div>
           </div>
         </div>
       </div>
-      <div className="rounded-lg border border-border overflow-hidden">
+      <div className="rounded-lg overflow-hidden shadow-[0_0_0_1px_hsl(var(--border))]">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 border-b border-border">
+          <thead className="bg-foreground/[0.03]">
             <tr>
               {["Target Domain", "Profile", "Status", "Progress", "Actions"].map((h) => (
                 <th
                   key={h}
-                  className="px-4 py-2.5 text-left font-medium text-xs uppercase tracking-wide text-muted-foreground"
+                  className="px-4 py-2.5 text-left font-medium text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2"
                 >
                   {h}
                 </th>

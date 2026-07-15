@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { History, Play, RotateCcw, Save } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Check, Copy, Play, RotateCcw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -129,6 +128,7 @@ export function ScanConfigurationCard({
   const [profileId, setProfileId] = useState<string>("");
   const [customArgs, setCustomArgs] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const bundle = profilesQ.data?.[tool];
   const profiles: ScanProfileSpec[] = bundle?.profiles ?? [];
@@ -231,10 +231,18 @@ export function ScanConfigurationCard({
     }
   };
 
+  const handleCopy = () => {
+    if (!preview) return;
+    navigator.clipboard.writeText(preview).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
-    <div className="rounded-md border border-border bg-card p-4 space-y-3">
+    <div className="card-panel space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Scan Configuration · {fqdn}</h3>
+        <h3 className="panel-title">Configure investigation · {fqdn}</h3>
         <ScansDropdown
           fqdn={fqdn}
           domainScans={domainScans}
@@ -268,20 +276,16 @@ export function ScanConfigurationCard({
         )}
 
         <Field label="Protocol">
-          <div className="inline-flex rounded-md border border-border overflow-hidden">
+          <div className="seg">
             {(["http", "https"] as Protocol[]).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setProtocol(p)}
-                className={`px-3 py-1 text-xs ${
-                  protocol === p
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-background hover:bg-muted/50"
-                }`}
-              >
-                {p.toUpperCase()}
-              </button>
+              <label key={p} className="seg-opt">
+                <input
+                  type="radio"
+                  checked={protocol === p}
+                  onChange={() => setProtocol(p)}
+                />
+                <span>{p.toUpperCase()}</span>
+              </label>
             ))}
           </div>
         </Field>
@@ -333,11 +337,29 @@ export function ScanConfigurationCard({
         <p className="text-xs text-muted-foreground">{activeProfile.description}</p>
       )}
 
-      <div>
-        <div className="text-xxs uppercase text-muted-foreground mb-1">
-          Command Preview
+      <div className="rounded-lg overflow-hidden border border-border">
+        <div className="flex items-center justify-between px-3 py-2 bg-foreground/[0.04] border-b border-border">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              <span className="h-2 w-2 rounded-full bg-divider" />
+              <span className="h-2 w-2 rounded-full bg-divider" />
+              <span className="h-2 w-2 rounded-full bg-divider" />
+            </div>
+            <span className="text-[10px] text-muted-foreground-2 tracking-[0.06em] uppercase ml-1">
+              Command preview
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopy}
+            disabled={!preview}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? "Copied" : "Copy"}
+          </button>
         </div>
-        <pre className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs font-mono whitespace-pre-wrap break-all">
+        <pre className="bg-surface-deep px-3 py-2.5 text-xs font-mono whitespace-pre-wrap break-all text-foreground/90">
           {preview || "—"}
         </pre>
       </div>

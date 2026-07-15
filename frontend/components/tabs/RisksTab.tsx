@@ -18,24 +18,24 @@ import { ApiError, api, type FindingRow, type FindingsPage } from "@/lib/api";
 const SEVERITY_ORDER = ["HIGH", "MED", "LOW", "INFO"] as const;
 
 const SEVERITY_COLORS: Record<string, string> = {
-  HIGH: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  MED: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  LOW: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  INFO: "bg-muted text-muted-foreground",
+  HIGH: "pill pill-hi",
+  MED: "pill pill-med",
+  LOW: "pill pill-low",
+  INFO: "pill pill-info",
 };
 
 const SEVERITY_DOT: Record<string, string> = {
-  HIGH: "bg-red-500",
-  MED: "bg-amber-500",
-  LOW: "bg-blue-500",
-  INFO: "bg-muted-foreground/50",
+  HIGH: "bg-sev-high",
+  MED: "bg-sev-med",
+  LOW: "bg-sev-low",
+  INFO: "bg-divider",
 };
 
 const SEVERITY_CHART_COLOR: Record<string, string> = {
-  HIGH: "hsl(var(--destructive))",
-  MED: "hsl(var(--warning))",
-  LOW: "hsl(var(--info))",
-  INFO: "hsl(var(--muted-foreground) / 0.5)",
+  HIGH: "hsl(var(--sev-high))",
+  MED: "hsl(var(--sev-med))",
+  LOW: "hsl(var(--sev-low))",
+  INFO: "hsl(var(--divider))",
 };
 
 interface RisksTabProps {
@@ -207,11 +207,7 @@ export function RisksTab({ scanId, scanProfile }: RisksTabProps) {
                     </td>
                     <td className="px-3 py-2 font-mono text-xs font-medium">{row.fqdn}</td>
                     <td className="px-3 py-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          SEVERITY_COLORS[row.severity] ?? SEVERITY_COLORS.INFO
-                        }`}
-                      >
+                      <span className={SEVERITY_COLORS[row.severity] ?? SEVERITY_COLORS.INFO}>
                         {row.severity}
                       </span>
                     </td>

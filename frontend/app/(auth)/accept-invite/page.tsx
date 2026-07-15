@@ -51,37 +51,41 @@ function AcceptInviteForm() {
 
   if (!token) {
     return (
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold text-foreground">Invalid invite</h1>
-        <p className="text-muted-foreground text-sm">No invite token in the URL.</p>
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-3">
+          <h1 className="text-2xl font-semibold text-foreground">Invalid invite</h1>
+          <p className="text-muted-foreground text-sm">No invite token in the URL.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <h1 className="text-2xl font-semibold text-foreground">Set your password</h1>
-      <p className="text-sm text-muted-foreground">
-        Welcome. Choose a password to activate your account.
-      </p>
-      <Input
-        type="password"
-        required
-        placeholder="new password (min 8 chars)"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <Input
-        type="password"
-        required
-        placeholder="confirm password"
-        value={confirm}
-        onChange={(e) => setConfirm(e.target.value)}
-      />
-      {err && <p className="text-destructive text-sm">{err}</p>}
-      <Button type="submit" disabled={busy} className="w-full">
-        {busy ? "Activating..." : "Activate account"}
-      </Button>
-    </form>
+    <div className="min-h-screen flex items-center justify-center px-4">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4">
+        <h1 className="text-2xl font-semibold text-foreground">Set your password</h1>
+        <p className="text-sm text-muted-foreground">
+          Welcome. Choose a password to activate your account.
+        </p>
+        <Input
+          type="password"
+          required
+          placeholder="new password (min 8 chars)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <Input
+          type="password"
+          required
+          placeholder="confirm password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+        />
+        {err && <p className="text-destructive text-sm">{err}</p>}
+        <Button type="submit" disabled={busy} className="w-full">
+          {busy ? "Activating..." : "Activate account"}
+        </Button>
+      </form>
+    </div>
   );
 }
