@@ -667,6 +667,7 @@ export type OpenRouterTestResult = {
 };
 
 export const OPENROUTER_PRESET_MODELS = [
+  "deepseek/deepseek-v4-flash",
   "openai/gpt-4o",
   "anthropic/claude-3.7-sonnet",
   "google/gemini-2.5-pro",

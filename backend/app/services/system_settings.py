@@ -17,8 +17,9 @@ from app.models import SystemSetting
 KEY_OPENROUTER_API_KEY = "openrouter_api_key"
 KEY_OPENROUTER_MODEL = "openrouter_default_model"
 
-DEFAULT_MODEL = "openai/gpt-oss-20b:free"
+DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 PRESET_MODELS = [
+    "deepseek/deepseek-v4-flash",
     "openai/gpt-4o",
     "anthropic/claude-3.7-sonnet",
     "google/gemini-2.5-pro",

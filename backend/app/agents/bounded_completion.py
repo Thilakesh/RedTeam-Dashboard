@@ -6,13 +6,23 @@ so callers can treat it as optional (scan stage is optional=True).
 from __future__ import annotations
 
 import json
+import logging
 from typing import NamedTuple
 
 import httpx
 
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Free-tier / flaky-provider responses (empty content, or a malformed body caused
+# by OpenRouter's SSE keep-alive comments leaking into a non-streamed response)
+# are worth retrying — they're transient, not a real failure. HTTP errors,
+# timeouts, and a missing API key are NOT retried: those aren't flaky-provider
+# symptoms and retrying them just wastes the stage's time budget.
+MAX_TRANSIENT_RETRIES = 2
 
 
 class BoundedCompletionError(RuntimeError):
@@ -25,33 +35,24 @@ class CompletionResult(NamedTuple):
     completion_tokens: int
 
 
-async def bounded_completion(
+def _strip_sse_noise(raw: str) -> str:
+    """Strip stray SSE comment/keep-alive lines (e.g. ": OPENROUTER PROCESSING")
+    that OpenRouter occasionally leaks into a non-streamed response body."""
+    lines = [ln for ln in raw.splitlines() if ln.strip() and not ln.lstrip().startswith(":")]
+    return "\n".join(lines).strip()
+
+
+async def _attempt(
     *,
     system: str,
     user: str,
-    model: str = "openai/gpt-oss-20b:free",
-    api_key: str | None = None,
-    max_input_chars: int = 40_000,
-    timeout: float = 120.0,
+    model: str,
+    api_key: str,
+    max_tokens: int,
+    timeout: float,
 ) -> CompletionResult:
-    """Call OpenRouter with JSON mode and a hard input character cap.
-
-    If len(user) > max_input_chars, the user string is truncated and a
-    '[truncated: input exceeded limit]' marker is appended so the model
-    knows the list is incomplete.
-
-    Returns CompletionResult on success.
-    Raises BoundedCompletionError on HTTP error, timeout, or empty API key.
-    """
-    api_key = api_key or get_settings().openrouter_api_key
-    if not api_key:
-        raise BoundedCompletionError(
-            "OPENROUTER_API_KEY is not set — cannot call risk prioritizer"
-        )
-
-    if len(user) > max_input_chars:
-        user = user[:max_input_chars] + "\n[truncated: input exceeded limit]"
-
+    """One HTTP call + parse. Raises BoundedCompletionError on any failure;
+    the retry loop in bounded_completion() decides which failures to retry."""
     payload = {
         "model": model,
         "messages": [
@@ -59,6 +60,7 @@ async def bounded_completion(
             {"role": "user", "content": user},
         ],
         "response_format": {"type": "json_object"},
+        "max_tokens": max_tokens,
     }
 
     try:
@@ -72,17 +74,25 @@ async def bounded_completion(
                 },
             )
             resp.raise_for_status()
-            data = resp.json()
+            body_text = resp.text
     except httpx.HTTPStatusError as exc:
         raise BoundedCompletionError(
             f"OpenRouter HTTP error: {exc.response.status_code}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise BoundedCompletionError("OpenRouter request timed out") from exc
-    except ValueError as exc:
-        raise BoundedCompletionError(
-            f"Failed to parse OpenRouter response body: {exc}"
-        ) from exc
+
+    try:
+        data = json.loads(body_text)
+    except json.JSONDecodeError:
+        cleaned = _strip_sse_noise(body_text)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            raise BoundedCompletionError(
+                f"Failed to parse OpenRouter response body: {exc}"
+            ) from exc
+
     try:
         choice = data["choices"][0]
         finish_reason = choice.get("finish_reason", "unknown")
@@ -92,18 +102,22 @@ async def bounded_completion(
             f"Unexpected OpenRouter response structure: {exc}"
         ) from exc
 
-    if raw is None:
+    if not raw or not raw.strip():
         raise BoundedCompletionError(
-            f"OpenRouter returned null content (finish_reason={finish_reason!r}, "
+            f"OpenRouter returned empty content (finish_reason={finish_reason!r}, "
             f"model={model!r}) — free model may be rate-limited or unavailable"
         )
 
     try:
         content = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise BoundedCompletionError(
-            f"OpenRouter returned invalid JSON (finish_reason={finish_reason!r}): {exc}"
-        ) from exc
+    except json.JSONDecodeError:
+        cleaned = _strip_sse_noise(raw)
+        try:
+            content = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            raise BoundedCompletionError(
+                f"OpenRouter returned invalid JSON (finish_reason={finish_reason!r}): {exc}"
+            ) from exc
 
     usage = data.get("usage") or {}
     return CompletionResult(
@@ -111,3 +125,63 @@ async def bounded_completion(
         prompt_tokens=int(usage.get("prompt_tokens") or 0),
         completion_tokens=int(usage.get("completion_tokens") or 0),
     )
+
+
+async def bounded_completion(
+    *,
+    system: str,
+    user: str,
+    model: str = "deepseek/deepseek-v4-flash",
+    api_key: str | None = None,
+    max_input_chars: int = 40_000,
+    max_tokens: int = 8000,
+    timeout: float = 120.0,
+) -> CompletionResult:
+    """Call OpenRouter with JSON mode and a hard input character cap.
+
+    If len(user) > max_input_chars, the user string is truncated and a
+    '[truncated: input exceeded limit]' marker is appended so the model
+    knows the list is incomplete.
+
+    Empty-content and malformed-body responses (both symptomatic of flaky
+    free-tier providers) are retried up to MAX_TRANSIENT_RETRIES times. HTTP
+    errors, timeouts, and a missing API key fail immediately, unretried.
+
+    Returns CompletionResult on success.
+    Raises BoundedCompletionError on final failure.
+    """
+    api_key = api_key or get_settings().openrouter_api_key
+    if not api_key:
+        raise BoundedCompletionError(
+            "OPENROUTER_API_KEY is not set — cannot call risk prioritizer"
+        )
+
+    if len(user) > max_input_chars:
+        user = user[:max_input_chars] + "\n[truncated: input exceeded limit]"
+
+    last_exc: BoundedCompletionError | None = None
+    for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+        try:
+            return await _attempt(
+                system=system,
+                user=user,
+                model=model,
+                api_key=api_key,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+        except BoundedCompletionError as exc:
+            msg = str(exc)
+            transient = "empty content" in msg or "invalid JSON" in msg or "Failed to parse" in msg
+            if not transient or attempt == MAX_TRANSIENT_RETRIES:
+                raise
+            last_exc = exc
+            logger.warning(
+                "bounded_completion: transient failure (attempt %d/%d), retrying: %s",
+                attempt + 1,
+                MAX_TRANSIENT_RETRIES + 1,
+                msg,
+            )
+
+    # Unreachable — the loop always returns or raises — but keeps type checkers happy.
+    raise last_exc or BoundedCompletionError("bounded_completion: exhausted retries")

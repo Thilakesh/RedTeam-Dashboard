@@ -34,7 +34,7 @@ def _mock_client(status: int = 200, body: dict | None = None):
         )
     else:
         mock_resp.raise_for_status = MagicMock()
-    mock_resp.json = MagicMock(return_value=body)
+    mock_resp.text = json.dumps(body)
 
     client = AsyncMock()
     client.__aenter__ = AsyncMock(return_value=client)
@@ -85,7 +85,8 @@ async def test_input_truncated_when_over_limit():
         captured["payload"] = json
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.json = MagicMock(return_value={
+        import json as json_module
+        mock_resp.text = json_module.dumps({
             "choices": [{"message": {"content": "{\"findings\":[]}"}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
         })
