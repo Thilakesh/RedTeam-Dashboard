@@ -19,7 +19,6 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { ScansDropdown } from "@/components/workspace/ScansDropdown";
 import { ScanConfigurationCard } from "@/components/workspace/ScanConfigurationCard";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -48,15 +47,12 @@ import {
 const VALID_TABS = ["overview", "subdomains", "tasks"] as const;
 type Tab = (typeof VALID_TABS)[number];
 
-const TASK_STATUS_VARIANT: Record<
-  InvestigationTaskOut["status"],
-  "success" | "warning" | "destructive" | "default"
-> = {
-  queued: "default",
-  running: "warning",
-  completed: "success",
-  failed: "destructive",
-  cancelled: "default",
+const TASK_STATUS_PILL: Record<InvestigationTaskOut["status"], string> = {
+  queued: "pill pill-out",
+  running: "pill pill-run",
+  completed: "pill pill-ok",
+  failed: "pill pill-err",
+  cancelled: "pill pill-info",
 };
 
 function WorkspaceContent({ params }: { params: { id: string } }) {
@@ -167,17 +163,20 @@ function WorkspaceContent({ params }: { params: { id: string } }) {
   return (
     <AppShell>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-xs text-muted-foreground mb-1">Target Workspace</div>
-          <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
+          <div className="h-12 w-12 rounded-lg bg-primary/[0.18] flex items-center justify-center shrink-0 mt-0.5">
             <Globe className="h-5 w-5 text-primary" />
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {workspace.label}
-            </h1>
-            <Badge variant="success">{workspace.status}</Badge>
           </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            Target: <span className="text-foreground">{workspace.target_domain}</span>
+          <div>
+            <div className="kicker mb-1">Target Workspace</div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-[28px] font-medium tracking-[-0.02em]">
+                {workspace.label}
+              </h1>
+              <span className="pill pill-ok">{workspace.status}</span>
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">
+              Target: <span className="text-foreground">{workspace.target_domain}</span>
             {workspace.parent_scan_id && (
               <>
                 {" · Source recon: "}
@@ -189,6 +188,7 @@ function WorkspaceContent({ params }: { params: { id: string } }) {
                 </Link>
               </>
             )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -273,22 +273,19 @@ function OverviewTab({
 
   return (
     <div className="space-y-6 py-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 divide-x divide-y lg:divide-y-0 divide-border rounded-lg shadow-[0_0_0_1px_hsl(var(--border))] overflow-hidden">
         {cards.map((c) => (
-          <div
-            key={c.label}
-            className="rounded-lg border border-border bg-card p-4"
-          >
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+          <div key={c.label} className="bg-card p-4">
+            <div className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground-2">
               {c.label}
             </div>
-            <div className="mt-1 text-2xl font-semibold">{c.value}</div>
+            <div className="mt-1 text-2xl font-medium">{c.value}</div>
           </div>
         ))}
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4">
-        <div className="text-sm font-medium mb-2">High Value Targets</div>
+      <div className="card-panel">
+        <div className="panel-title mb-2">High Value Targets</div>
         {hvtRows.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No HVT signals detected yet. Recon-side panel detection + vuln-side
@@ -297,9 +294,9 @@ function OverviewTab({
         ) : (
           <div className="flex flex-wrap gap-2">
             {hvtRows.map(([type, count]) => (
-              <Badge key={type} variant="warning">
+              <span key={type} className="pill pill-med">
                 {type} · {count}
-              </Badge>
+              </span>
             ))}
           </div>
         )}
@@ -601,21 +598,21 @@ function SubdomainRow({
           )}
         </td>
         <td className="px-4 py-3">
-          <div className="font-medium">{row.fqdn}</div>
+          <div className="font-medium font-mono text-[13px]">{row.fqdn}</div>
           {row.hvt_signals.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
               {row.hvt_signals.map((s) => (
-                <Badge key={s} variant="warning" className="text-xxs">
+                <span key={s} className="pill pill-med text-[10px] px-1.5 py-0">
                   {s}
-                </Badge>
+                </span>
               ))}
             </div>
           )}
         </td>
         <td className="px-4 py-3">
-          <Badge variant={row.alive ? "success" : "default"}>
+          <span className={row.alive ? "pill pill-ok" : "pill pill-info"}>
             {row.alive ? "Alive" : "Unknown"}
-          </Badge>
+          </span>
         </td>
         <td className="px-4 py-3 text-xs">
           {row.ports.length ? row.ports.join(", ") : "—"}
@@ -716,9 +713,9 @@ function TasksTab({
                 <td className="px-4 py-3">{t.asset_label}</td>
                 <td className="px-4 py-3 text-xs">{TOOL_LABELS[t.tool] ?? t.tool}</td>
                 <td className="px-4 py-3">
-                  <Badge variant={TASK_STATUS_VARIANT[t.status] ?? "default"}>
+                  <span className={TASK_STATUS_PILL[t.status] ?? "pill pill-info"}>
                     {t.status}
-                  </Badge>
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-xs">
                   {t.status === "running"

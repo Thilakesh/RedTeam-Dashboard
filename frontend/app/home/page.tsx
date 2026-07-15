@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, AlertTriangle, Crosshair, Layers } from "lucide-react";
+import { Activity, AlertTriangle, Crosshair, Layers, Rocket, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth-context";
 import { getDashboardSummary, type DashboardSummary } from "@/lib/api";
@@ -10,41 +10,40 @@ import { getDashboardSummary, type DashboardSummary } from "@/lib/api";
 const SEVERITY_ORDER = ["HIGH", "MED", "LOW", "INFO"] as const;
 
 const SEVERITY_DOT: Record<string, string> = {
-  HIGH: "bg-red-500",
-  MED: "bg-amber-500",
-  LOW: "bg-blue-500",
-  INFO: "bg-muted-foreground/50",
+  HIGH: "bg-sev-high",
+  MED: "bg-sev-med",
+  LOW: "bg-sev-low",
+  INFO: "bg-divider",
 };
 
 const SEVERITY_STROKE: Record<string, string> = {
-  HIGH: "hsl(0 72% 51%)",
-  MED: "hsl(38 92% 50%)",
-  LOW: "hsl(217 91% 60%)",
-  INFO: "hsl(var(--muted-foreground) / 0.5)",
+  HIGH: "hsl(var(--sev-high))",
+  MED: "hsl(var(--sev-med))",
+  LOW: "hsl(var(--sev-low))",
+  INFO: "hsl(var(--divider))",
 };
 
 const SEVERITY_TEXT: Record<string, string> = {
-  HIGH: "text-red-600 dark:text-red-400",
-  MED: "text-amber-600 dark:text-amber-400",
-  LOW: "text-blue-600 dark:text-blue-400",
+  HIGH: "text-sev-high-fg",
+  MED: "text-sev-med-fg",
+  LOW: "text-sev-low-fg",
   INFO: "text-muted-foreground",
 };
 
-// Matches components/tabs/RisksTab.tsx's SEVERITY_COLORS convention exactly.
-const SEVERITY_BADGE: Record<string, string> = {
-  HIGH: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  MED: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-  LOW: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  INFO: "bg-muted text-muted-foreground",
+const SEVERITY_PILL: Record<string, string> = {
+  HIGH: "pill pill-hi",
+  MED: "pill pill-med",
+  LOW: "pill pill-low",
+  INFO: "pill pill-info",
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  completed: "bg-success/15 text-success",
-  running: "bg-info/15 text-info",
-  created: "bg-info/15 text-info",
-  queued: "bg-muted text-muted-foreground",
-  failed: "bg-destructive/15 text-destructive",
-  stopped: "bg-warning/15 text-warning",
+const STATUS_PILL: Record<string, string> = {
+  completed: "pill pill-ok",
+  running: "pill pill-run",
+  created: "pill pill-run",
+  queued: "pill pill-info",
+  failed: "pill pill-err",
+  stopped: "pill pill-warn",
 };
 
 function timeAgo(iso: string): string {
@@ -57,32 +56,49 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Good night";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 export default function DashboardHomePage() {
-  const { hasFeature } = useAuth();
+  const { user, hasFeature } = useAuth();
   const q = useQuery({ queryKey: ["dashboard-summary"], queryFn: getDashboardSummary });
+  const name = (user?.email || "").split("@")[0] || "there";
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
+      <div className="flex items-end justify-between gap-6 mb-6 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <div className="kicker mb-2">Console · Recon Dashboard</div>
+          <h1 className="page-h1">
+            {greeting()}, {name}.
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Your scans, findings, and workspaces at a glance.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <div className="hidden md:flex cmd-box w-[280px] xl:w-[320px] text-muted-foreground">
+            <Search className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="flex-1 text-[13px] truncate">Search domains, IPs, findings…</span>
+            <span className="kbd">⌘K</span>
+          </div>
           {hasFeature("operations") && (
             <Link
               href="/operations/launch"
-              className="h-9 px-4 inline-flex items-center rounded-md border border-border text-sm font-medium hover:bg-accent"
+              className="h-9 px-4 inline-flex items-center gap-1.5 rounded-md border border-border text-sm font-medium hover:bg-accent whitespace-nowrap"
             >
-              Launch Operation
+              <Rocket className="h-3.5 w-3.5" /> Launch Operation
             </Link>
           )}
           {hasFeature("recon") && (
             <Link
               href="/dashboard"
-              className="h-9 px-4 inline-flex items-center rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90"
+              className="h-9 px-4 inline-flex items-center rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 whitespace-nowrap"
             >
               + New Scan
             </Link>
@@ -98,9 +114,9 @@ export default function DashboardHomePage() {
       {q.data && (
         <div className="space-y-4">
           <KpiRow data={q.data} />
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.3fr] gap-4">
-            <SeverityCard data={q.data} />
+          <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
             <ActivityCard data={q.data} />
+            <SeverityCard data={q.data} />
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <RecentScansCard data={q.data} />
@@ -114,20 +130,22 @@ export default function DashboardHomePage() {
 
 function KpiRow({ data }: { data: DashboardSummary }) {
   const tiles = [
-    { label: "Active scans", value: data.active_scans, icon: Activity, tone: "text-primary bg-primary/10" },
-    { label: "Assets tracked", value: data.assets_tracked, icon: Layers, tone: "text-success bg-success/10" },
-    { label: "Open findings", value: data.open_findings, icon: AlertTriangle, tone: "text-destructive bg-destructive/10" },
-    { label: "Target workspaces", value: data.workspaces, icon: Crosshair, tone: "text-warning bg-warning/10" },
+    { label: "Active scans", value: data.active_scans, icon: Activity, valueClass: "text-primary-tint" },
+    { label: "Assets tracked", value: data.assets_tracked, icon: Layers, valueClass: "" },
+    { label: "Open findings", value: data.open_findings, icon: AlertTriangle, valueClass: "text-sev-high-fg" },
+    { label: "Target workspaces", value: data.workspaces, icon: Crosshair, valueClass: "" },
   ];
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {tiles.map((t) => (
-        <div key={t.label} className="rounded-lg border border-border bg-card p-4">
-          <div className={`h-8 w-8 rounded-md flex items-center justify-center mb-3 ${t.tone}`}>
-            <t.icon className="h-4 w-4" />
+        <div key={t.label} className="stat-tile">
+          <div className="text-[10px] tracking-[0.1em] uppercase text-muted-foreground-2 flex items-center gap-1.5">
+            <t.icon className="h-3 w-3" />
+            {t.label}
           </div>
-          <div className="text-2xl font-semibold tabular-nums tracking-tight">{t.value}</div>
-          <div className="text-xs text-muted-foreground mt-0.5">{t.label}</div>
+          <div className={`text-[30px] font-medium tabular-nums tracking-[-0.02em] ${t.valueClass}`}>
+            {t.value}
+          </div>
         </div>
       ))}
     </div>
@@ -149,9 +167,9 @@ function SeverityCard({ data }: { data: DashboardSummary }) {
   });
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="text-sm font-semibold">Findings by severity</div>
-      <div className="text-xs text-muted-foreground mb-4">
+    <div className="card-panel">
+      <div className="panel-title">Findings by severity</div>
+      <div className="panel-sub mb-4">
         {total > 0 ? `${total} total across your scans` : "No findings yet"}
       </div>
       <div className="flex items-center gap-6">
@@ -218,9 +236,9 @@ function ActivityCard({ data }: { data: DashboardSummary }) {
   const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="text-sm font-semibold">Scan activity</div>
-      <div className="text-xs text-muted-foreground mb-4">Completed scans per day, last 7 days</div>
+    <div className="card-panel">
+      <div className="panel-title">Scan activity</div>
+      <div className="panel-sub mb-4">Completed scans per day, last 7 days</div>
       <svg width="100%" height="120" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ overflow: "visible" }}>
         <defs>
           <linearGradient id="dashSparkFill" x1="0" y1="0" x2="0" y2="1">
@@ -265,9 +283,18 @@ function ActivityCard({ data }: { data: DashboardSummary }) {
 
 function RecentScansCard({ data }: { data: DashboardSummary }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="text-sm font-semibold">Recent scans</div>
-      <div className="text-xs text-muted-foreground mb-3">Your last {data.recent_scans.length || 0} scans</div>
+    <div className="card-panel">
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <div className="panel-title">Recent scans</div>
+          <div className="panel-sub">Your last {data.recent_scans.length || 0} scans</div>
+        </div>
+        {data.recent_scans.length > 0 && (
+          <Link href="/dashboard/recon-jobs" className="text-[11px] text-primary hover:underline">
+            View all →
+          </Link>
+        )}
+      </div>
       {data.recent_scans.length === 0 && (
         <p className="text-sm text-muted-foreground py-6 text-center">No scans yet.</p>
       )}
@@ -275,33 +302,35 @@ function RecentScansCard({ data }: { data: DashboardSummary }) {
         <Link
           key={s.id}
           href={`/scans/${s.id}`}
-          className="flex items-center justify-between gap-3 py-3 border-t border-border first:border-t-0 hover:bg-accent/40 -mx-1 px-1 rounded"
+          className="row-strip flex items-center justify-between gap-3 py-3 hover:bg-accent/40 -mx-1 px-1 rounded"
         >
           <div className="min-w-0">
-            <div className="text-sm font-medium truncate">{s.domain}</div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-[13px] font-medium truncate">{s.domain}</div>
+            <div className="text-[11px] text-muted-foreground-2">
               {s.profile} · {timeAgo(s.created_at)}
             </div>
           </div>
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${STATUS_BADGE[s.status] ?? "bg-muted text-muted-foreground"}`}>
-            {s.status}
-          </span>
+          <span className={STATUS_PILL[s.status] ?? "pill pill-info"}>{s.status}</span>
         </Link>
       ))}
-      {data.recent_scans.length > 0 && (
-        <Link href="/dashboard/recon-jobs" className="block text-center text-xs font-medium text-primary mt-3 hover:underline">
-          View all scans →
-        </Link>
-      )}
     </div>
   );
 }
 
 function TopFindingsCard({ data }: { data: DashboardSummary }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <div className="text-sm font-semibold">Top findings</div>
-      <div className="text-xs text-muted-foreground mb-3">Ranked by risk score, across your scans</div>
+    <div className="card-panel">
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <div className="panel-title">Top findings</div>
+          <div className="panel-sub">Ranked by risk score, across your scans</div>
+        </div>
+        {data.top_findings.length > 0 && (
+          <Link href="/dashboard/recon-jobs" className="text-[11px] text-primary hover:underline">
+            View all →
+          </Link>
+        )}
+      </div>
       {data.top_findings.length === 0 && (
         <p className="text-sm text-muted-foreground py-6 text-center">No findings yet — run a deep scan to populate this.</p>
       )}
@@ -309,22 +338,15 @@ function TopFindingsCard({ data }: { data: DashboardSummary }) {
         <Link
           key={`${f.scan_id}-${i}`}
           href={`/scans/${f.scan_id}?tab=risks`}
-          className="flex items-center justify-between gap-3 py-3 border-t border-border first:border-t-0 hover:bg-accent/40 -mx-1 px-1 rounded"
+          className="row-strip flex items-center justify-between gap-3 py-3 hover:bg-accent/40 -mx-1 px-1 rounded"
         >
           <div className="min-w-0">
-            <div className="text-sm font-medium truncate">{f.fqdn}</div>
-            <div className="text-xs text-muted-foreground truncate">{f.rationale}</div>
+            <div className="text-[13px] font-medium truncate">{f.fqdn}</div>
+            <div className="text-[11px] text-muted-foreground-2 truncate">{f.rationale}</div>
           </div>
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${SEVERITY_BADGE[f.severity] ?? SEVERITY_BADGE.INFO}`}>
-            {f.severity}
-          </span>
+          <span className={SEVERITY_PILL[f.severity] ?? SEVERITY_PILL.INFO}>{f.severity}</span>
         </Link>
       ))}
-      {data.top_findings.length > 0 && (
-        <Link href="/dashboard/recon-jobs" className="block text-center text-xs font-medium text-primary mt-3 hover:underline">
-          View all findings →
-        </Link>
-      )}
     </div>
   );
 }

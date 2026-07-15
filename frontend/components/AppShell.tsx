@@ -13,6 +13,7 @@ import {
   Radar,
   Rocket,
   ScanSearch,
+  Search,
   Settings,
   Users,
 } from "lucide-react";
@@ -150,21 +151,21 @@ function Sidebar({ pathname, isAdmin }: { pathname: string; isAdmin: boolean }) 
   const { user, hasFeature } = useAuth();
   const navMain = NAV_MAIN.filter((item) => !item.feature || hasFeature(item.feature));
   return (
-    <aside className="w-60 shrink-0 bg-sidebar text-sidebar-foreground border-r border-black/30 flex flex-col">
+    <aside className="w-60 shrink-0 bg-surface-deep text-sidebar-foreground border-r border-white/5 flex flex-col">
       <div className="px-5 h-16 flex items-center gap-2 border-b border-white/5">
-        <div className="h-8 w-8 rounded-md bg-primary/15 flex items-center justify-center">
+        <div className="h-8 w-8 rounded-md bg-primary/[0.18] flex items-center justify-center">
           <Radar className="h-4 w-4 text-primary" />
         </div>
-        <span className="font-semibold text-white text-[15px] tracking-tight">Recon Dashboard</span>
+        <span className="font-semibold text-foreground text-[15px] tracking-tight">Recon Dashboard</span>
       </div>
-      <div className="px-3 py-3 text-xxs uppercase tracking-wider text-white/40">Main</div>
+      <div className="px-3 py-3 kicker !text-muted-foreground-2 !text-[10px]">Main</div>
       <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
         {navMain.map((item) => (
           <NavRow key={item.href} item={item} pathname={pathname} />
         ))}
         {isAdmin && (
           <>
-            <div className="px-3 pt-4 pb-2 text-xxs uppercase tracking-wider text-white/40">
+            <div className="px-3 pt-4 pb-2 kicker !text-muted-foreground-2 !text-[10px]">
               Admin
             </div>
             {NAV_ADMIN.map((item) => (
@@ -187,41 +188,51 @@ function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
   const hasChildren = !!item.children?.length;
 
   const rowClass = cn(
-    "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-    active ? "bg-primary/15 text-white" : "text-white/70 hover:bg-white/5 hover:text-white",
+    "w-full flex items-center gap-2.5 pl-2 pr-3 py-2 rounded-md text-sm transition-colors",
+    active
+      ? "nav-item-active text-foreground"
+      : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-foreground",
   );
 
   return (
     <div>
       {hasChildren ? (
         <button onClick={() => setOpen((v) => !v)} className={rowClass}>
+          <span className="nav-mark h-5" />
           <Icon className="h-4 w-4" />
           <span className="flex-1 text-left">{item.label}</span>
           <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
         </button>
       ) : (
         <Link href={item.href} className={rowClass}>
+          <span className="nav-mark h-5" />
           <Icon className="h-4 w-4" />
           <span className="flex-1 text-left">{item.label}</span>
           {item.badge && (
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-white/60">
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/10 text-sidebar-foreground/60">
               {item.badge}
             </span>
           )}
         </Link>
       )}
       {hasChildren && open && (
-        <div className="ml-4 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
-          {item.children!.map((c) => (
-            <Link
-              key={c.href}
-              href={c.href}
-              className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-white/60 hover:text-white hover:bg-white/5"
-            >
-              <span className="h-1 w-1 rounded-full bg-white/40" />
-              {c.label}
-            </Link>
-          ))}
+        <div className="ml-[34px] mt-0.5 space-y-0.5">
+          {item.children!.map((c) => {
+            const childActive = pathname === c.href;
+            return (
+              <Link
+                key={c.href}
+                href={c.href}
+                className={cn(
+                  "flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:text-foreground hover:bg-white/5",
+                  childActive ? "text-primary" : "text-sidebar-foreground/60",
+                )}
+              >
+                <span className="h-[3px] w-[3px] rounded-full bg-current opacity-60" />
+                {c.label}
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>
@@ -232,13 +243,13 @@ function UserChip({ email, role }: { email: string; role: string }) {
   const initial = (email || "?").trim()[0]?.toUpperCase() ?? "?";
   return (
     <div className="border-t border-white/5 p-3">
-      <div className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-white/5">
-        <div className="h-8 w-8 rounded-full bg-primary/30 text-white text-sm flex items-center justify-center font-medium">
+      <div className="flex items-center gap-3 px-2.5 py-2 rounded-md bg-white/[0.04]">
+        <div className="h-[30px] w-[30px] rounded-full bg-primary/30 text-foreground text-xs flex items-center justify-center font-semibold shrink-0">
           {initial}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-white truncate">{email || "—"}</div>
-          <div className="text-xxs text-white/50 capitalize">{role}</div>
+          <div className="text-xs font-medium text-foreground truncate">{email || "—"}</div>
+          <div className="text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">{role}</div>
         </div>
       </div>
     </div>
@@ -269,6 +280,11 @@ function TopBar({
         ))}
       </nav>
       <div className="flex items-center gap-2">
+        <div className="hidden lg:flex cmd-box w-[280px] xl:w-[380px] text-muted-foreground">
+          <Search className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span className="flex-1 text-[13px] truncate">Search domains, IPs, findings…</span>
+          <span className="kbd">⌘K</span>
+        </div>
         {hasFeature("recon") && (
           <Link
             href="/dashboard"

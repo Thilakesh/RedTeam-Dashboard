@@ -10,11 +10,15 @@
     --card-foreground: 222 47% 11%;
     --muted: 210 20% 96%;
     --muted-foreground: 215 16% 47%;
+    --muted-foreground-2: 215 16% 60%;
     --border: 214 32% 91%;
+    --divider: 215 16% 82%;
     --input: 214 32% 91%;
     --ring: 222 84% 56%;
     --primary: 244 75% 60%;
     --primary-foreground: 0 0% 100%;
+    --primary-tint: 244 75% 92%;
+    --primary-tint-2: 244 75% 85%;
     --accent: 210 20% 96%;
     --accent-foreground: 222 47% 11%;
     --destructive: 0 72% 51%;
@@ -22,33 +26,53 @@
     --sidebar: 220 26% 14%;
     --sidebar-foreground: 215 20% 80%;
     --sidebar-active: 244 75% 60%;
+    --surface-deep: 210 20% 97%;
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
     --info: 217 91% 60%;
+    --sev-high: 0 72% 51%;
+    --sev-high-fg: 0 70% 40%;
+    --sev-med: 38 92% 50%;
+    --sev-med-fg: 38 85% 35%;
+    --sev-low: 217 91% 60%;
+    --sev-low-fg: 217 85% 40%;
+    --sev-ok-fg: 142 71% 35%;
   }
 
   .dark {
-    --background: 224 32% 7%;
-    --foreground: 210 40% 96%;
-    --card: 222 28% 10%;
-    --card-foreground: 210 40% 96%;
-    --muted: 222 28% 14%;
-    --muted-foreground: 215 16% 65%;
-    --border: 222 28% 18%;
-    --input: 222 28% 18%;
-    --ring: 244 75% 60%;
-    --primary: 244 75% 65%;
+    --background: 233 27% 12%;
+    --foreground: 240 10% 92%;
+    --card: 232 18% 17%;
+    --card-foreground: 240 10% 92%;
+    --muted: 227 10% 27%;
+    --muted-foreground: 230 12% 62%;
+    --muted-foreground-2: 229 9% 50%;
+    --border: 227 10% 27%;
+    --divider: 227 10% 39%;
+    --input: 227 10% 27%;
+    --ring: 249 53% 68%;
+    --primary: 249 53% 68%;
     --primary-foreground: 0 0% 100%;
-    --accent: 222 28% 16%;
-    --accent-foreground: 210 40% 96%;
-    --destructive: 0 72% 51%;
+    --primary-tint: 247 93% 83%;
+    --primary-tint-2: 245 92% 90%;
+    --accent: 232 15% 20%;
+    --accent-foreground: 240 10% 92%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --sidebar: 224 36% 5%;
-    --sidebar-foreground: 215 20% 75%;
-    --sidebar-active: 244 75% 65%;
+    --sidebar: 233 36% 9%;
+    --sidebar-foreground: 230 12% 72%;
+    --sidebar-active: 249 53% 68%;
+    --surface-deep: 233 36% 9%;
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
     --info: 217 91% 60%;
+    --sev-high: 0 84% 60%;
+    --sev-high-fg: 0 94% 82%;
+    --sev-med: 38 92% 50%;
+    --sev-med-fg: 46 97% 65%;
+    --sev-low: 213 94% 68%;
+    --sev-low-fg: 212 96% 78%;
+    --sev-ok-fg: 142 77% 73%;
   }
 
   html, body {
@@ -57,6 +81,167 @@
   }
 
   *, *::before, *::after { border-color: hsl(var(--border)); }
+}
+
+@layer components {
+  /* Nocturne design-system primitives — reusable across the per-screen restyle.
+     All colors reference CSS vars so both themes (and the toggle) keep working. */
+
+  .kicker {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: hsl(var(--primary));
+  }
+
+  .page-h1 {
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+
+  .card-panel {
+    background: hsl(var(--card));
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 0 0 1px hsl(var(--border));
+  }
+
+  .stat-tile {
+    background: hsl(var(--card));
+    border-radius: 8px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 0 0 1px hsl(var(--border));
+  }
+
+  .panel-title {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .panel-sub {
+    font-size: 11px;
+    color: hsl(var(--muted-foreground-2));
+    margin-top: 2px;
+  }
+
+  .rule-fade {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(
+      to right,
+      transparent,
+      hsl(var(--foreground) / 0.14) 48px,
+      hsl(var(--foreground) / 0.14) calc(100% - 48px),
+      transparent
+    );
+  }
+
+  .row-strip {
+    background: linear-gradient(
+        to right,
+        transparent,
+        hsl(var(--foreground) / 0.08) 48px,
+        hsl(var(--foreground) / 0.08) calc(100% - 48px),
+        transparent
+      )
+      no-repeat bottom / 100% 1px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+  .pill-hi { background: hsl(var(--sev-high) / 0.2); color: hsl(var(--sev-high-fg)); }
+  .pill-med { background: hsl(var(--sev-med) / 0.18); color: hsl(var(--sev-med-fg)); }
+  .pill-low { background: hsl(var(--sev-low) / 0.18); color: hsl(var(--sev-low-fg)); }
+  .pill-info { background: hsl(var(--muted)); color: hsl(var(--foreground) / 0.85); }
+  .pill-run { background: hsl(var(--primary) / 0.2); color: hsl(var(--primary-tint-2)); }
+  .pill-ok { background: hsl(var(--success) / 0.18); color: hsl(var(--sev-ok-fg)); }
+  .pill-warn { background: hsl(var(--sev-med) / 0.18); color: hsl(var(--sev-med-fg)); }
+  .pill-err { background: hsl(var(--sev-high) / 0.2); color: hsl(var(--sev-high-fg)); }
+  .pill-out { border: 1px solid hsl(var(--divider)); color: hsl(var(--foreground) / 0.85); }
+
+  .cmd-box {
+    background: hsl(var(--foreground) / 0.04);
+    border: 1px solid hsl(var(--border));
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .kbd {
+    font-family: "SFMono-Regular", ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground) / 0.85);
+    border: 1px solid hsl(var(--divider));
+  }
+
+  .seg {
+    display: inline-flex;
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .seg-opt {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+  }
+  .seg-opt input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .seg-opt:has(input:checked) {
+    background: hsl(var(--primary) / 0.15);
+    color: hsl(var(--primary-tint-2));
+  }
+
+  .nav-mark {
+    width: 2px;
+    align-self: stretch;
+    background: transparent;
+    border-radius: 2px;
+  }
+  .nav-item-active .nav-mark {
+    background: hsl(var(--primary));
+  }
+
+  .progress {
+    height: 4px;
+    background: hsl(var(--foreground) / 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress > i {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--primary-tint)));
+    border-radius: 3px;
+    transition: width 300ms ease-out;
+  }
 }
 
 @layer utilities {
