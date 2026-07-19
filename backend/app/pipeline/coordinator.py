@@ -100,6 +100,19 @@ async def execute_dag(
                 records = await stage.execute(ctx)
                 await on_done(stage, records, stage_handle)
                 return StageResult(stage=stage, records=records)
+            except asyncio.CancelledError:
+                # Job-level cancellation (arq's job_timeout, or an explicit
+                # stop) — CancelledError is a BaseException, not Exception, so
+                # it would otherwise skip on_fail entirely and leave this
+                # stage's row stuck at "running" forever. Always record it as
+                # failed and always re-raise: a cancellation is never a soft,
+                # optional-stage failure to swallow and continue past.
+                await on_fail(
+                    stage,
+                    RuntimeError("stage cancelled (job timeout or scan stopped)"),
+                    stage_handle,
+                )
+                raise
             except Exception as exc:
                 await on_fail(stage, exc, stage_handle)
                 optional = getattr(stage, "optional", False)

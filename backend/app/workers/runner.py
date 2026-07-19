@@ -9,6 +9,7 @@ coordinator runs stages in parallel via asyncio.gather, so every callback opens 
 own short-lived session.
 """
 
+import asyncio
 import json
 import os
 from datetime import datetime, timezone
@@ -159,16 +160,24 @@ async def run_scan(_ctx: dict, scan_id_str: str) -> None:
             await _publish(redis, scan_id, "scan.completed")
         # If stopped, the stop_scan API endpoint already published scan.stopped
     except BaseException as exc:
+        # CancelledError (job_timeout, or the arq worker being stopped) has no
+        # message of its own — str(exc) is "" — which is why this used to
+        # write a blank error onto the scan row. Give it a real reason.
+        error_msg = str(exc)[:1900] or (
+            "scan cancelled (job timeout)"
+            if isinstance(exc, asyncio.CancelledError)
+            else exc.__class__.__name__
+        )
         fresh_scan = None
         async with SessionLocal() as db:
             fresh_scan = await db.get(Scan, scan_id)
             if fresh_scan is not None and fresh_scan.status != ScanStatus.stopped:
                 fresh_scan.status = ScanStatus.failed
                 fresh_scan.finished_at = datetime.now(timezone.utc)
-                fresh_scan.error = str(exc)[:1900]
+                fresh_scan.error = error_msg
                 await db.commit()
         if fresh_scan is None or fresh_scan.status != ScanStatus.stopped:
-            await _publish(redis, scan_id, "scan.failed", error=str(exc)[:500])
+            await _publish(redis, scan_id, "scan.failed", error=error_msg[:500])
         raise
     finally:
         await redis.aclose()
@@ -186,5 +195,10 @@ class WorkerSettings:
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     queue_name = os.getenv("ARQ_QUEUE_NAME", "default")
-    job_timeout = 60 * 30
+    # Flat 30 min was sized for small/medium targets — a deep scan against a
+    # large surface (dozens of hosts, each needing its own nmap subprocess)
+    # can legitimately need longer even with bounded concurrency. Override
+    # per-deployment via env; the heavy-worker (which runs the deep-profile
+    # queue) should set this higher than the default/quick-standard worker.
+    job_timeout = int(os.getenv("SCAN_JOB_TIMEOUT_SECONDS", str(60 * 30)))
     max_jobs = 4
