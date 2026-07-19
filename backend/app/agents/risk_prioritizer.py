@@ -32,6 +32,27 @@ from app.services.system_settings import get_openrouter_config
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Output token budget — scaled to the asset count instead of a flat cap.
+#
+# A flat max_tokens (previously 8000) silently truncates the LLM's JSON
+# mid-output on large targets (each asset needs its own severity/rationale/
+# signals/recommended_action block, roughly PER_ASSET_TOKENS worth), which
+# bounded_completion now surfaces as ResponseTruncatedError instead of a
+# generic parse error — but scaling the budget up front avoids hitting it at
+# all for the common case.
+# ---------------------------------------------------------------------------
+_PER_ASSET_TOKENS = 220
+_BASE_TOKENS = 500
+_MIN_MAX_TOKENS = 8000
+_MAX_MAX_TOKENS = 64_000
+
+
+def _estimate_max_tokens(asset_count: int) -> int:
+    estimate = _BASE_TOKENS + _PER_ASSET_TOKENS * asset_count
+    return max(_MIN_MAX_TOKENS, min(_MAX_MAX_TOKENS, estimate))
+
+
+# ---------------------------------------------------------------------------
 # LLM system prompt — static, never user-controllable.
 # ---------------------------------------------------------------------------
 
@@ -125,6 +146,7 @@ class RiskPrioritizerStage:
             model=or_model,
             api_key=or_api_key,
             max_input_chars=40_000,
+            max_tokens=_estimate_max_tokens(len(asset_list)),
             timeout=120.0,
         )
 

@@ -116,3 +116,38 @@ async def test_missing_api_key_raises():
 
     with pytest.raises(BoundedCompletionError, match="OPENROUTER_API_KEY"):
         await bounded_completion(system="sys", user="user")
+
+
+@pytest.mark.asyncio
+async def test_truncated_response_raises_immediately_without_retry():
+    """finish_reason='length' + unparseable content must raise ResponseTruncatedError
+    on the first attempt — retrying a deterministic token-budget truncation just
+    reproduces the same failure and wastes the stage's time budget."""
+    from app.agents.bounded_completion import bounded_completion, ResponseTruncatedError
+
+    call_count = 0
+
+    async def fake_post(url, json=None, headers=None):
+        nonlocal call_count
+        call_count += 1
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = __import__("json").dumps({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": '{"findings": [{"fqdn": "a.example.com", "sev'},
+            }],
+            "usage": {"prompt_tokens": 500, "completion_tokens": 8000},
+        })
+        return mock_resp
+
+    client = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.post = AsyncMock(side_effect=fake_post)
+
+    with patch("app.agents.bounded_completion.httpx.AsyncClient", return_value=client):
+        with pytest.raises(ResponseTruncatedError):
+            await bounded_completion(system="sys", user="user")
+
+    assert call_count == 1, "truncated response must not be retried"

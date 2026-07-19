@@ -29,6 +29,15 @@ class BoundedCompletionError(RuntimeError):
     """Raised when the OpenRouter call fails for any reason."""
 
 
+class ResponseTruncatedError(BoundedCompletionError):
+    """Raised when the model hit max_tokens mid-JSON (finish_reason='length').
+
+    This is deterministic given the same input + max_tokens — retrying with an
+    unchanged token budget just reproduces the same truncation. Callers should
+    scale max_tokens to the input size instead of retrying this.
+    """
+
+
 class CompletionResult(NamedTuple):
     content: dict           # parsed JSON from model response
     prompt_tokens: int
@@ -115,6 +124,12 @@ async def _attempt(
         try:
             content = json.loads(cleaned)
         except json.JSONDecodeError as exc:
+            if finish_reason == "length":
+                raise ResponseTruncatedError(
+                    f"OpenRouter truncated the response mid-JSON (finish_reason='length', "
+                    f"max_tokens={max_tokens}) — the input was too large for the token "
+                    f"budget: {exc}"
+                ) from exc
             raise BoundedCompletionError(
                 f"OpenRouter returned invalid JSON (finish_reason={finish_reason!r}): {exc}"
             ) from exc
@@ -145,7 +160,9 @@ async def bounded_completion(
 
     Empty-content and malformed-body responses (both symptomatic of flaky
     free-tier providers) are retried up to MAX_TRANSIENT_RETRIES times. HTTP
-    errors, timeouts, and a missing API key fail immediately, unretried.
+    errors, timeouts, a missing API key, and a max_tokens truncation
+    (ResponseTruncatedError — deterministic, not flaky) fail immediately,
+    unretried.
 
     Returns CompletionResult on success.
     Raises BoundedCompletionError on final failure.
@@ -170,6 +187,11 @@ async def bounded_completion(
                 max_tokens=max_tokens,
                 timeout=timeout,
             )
+        except ResponseTruncatedError:
+            # Deterministic given the same input + max_tokens — retrying reproduces
+            # the identical truncation, so fail immediately instead of burning the
+            # retry budget on a guaranteed repeat.
+            raise
         except BoundedCompletionError as exc:
             msg = str(exc)
             transient = "empty content" in msg or "invalid JSON" in msg or "Failed to parse" in msg
